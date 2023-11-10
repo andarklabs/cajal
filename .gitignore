@@ -1,6 +1,9 @@
 # Prerequisites
 *.d
 
+#ignore my play areas
+playground*
+
 # Compiled Object files
 *.slo
 *.lo
