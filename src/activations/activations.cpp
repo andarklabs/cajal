@@ -1,5 +1,5 @@
 #include <math.h>
 #include <iostream>
-#include "relu.h"
+#include "activations.h"
 
 using namespace std;
