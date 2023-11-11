@@ -1,13 +1,11 @@
-#ifndef TENSOR_H
-#define TENSOR_H
+#ifndef ACTIVATIONS_H
+#define ACTIVATIONS_H
 
 #include <iostream>
 
 using namespace std;
 
-class Tensor{
 
 
 
-};
 #endif
