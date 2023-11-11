@@ -1,2 +1,2 @@
 # cajal
-Skeleton Neural Network Library for C++
+Neural Network Library for C++
