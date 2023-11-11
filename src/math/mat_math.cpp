@@ -1,9 +1,6 @@
 #include <math.h>
 #include <iostream>
-#include "dense.h"
+#include "mat_math.h"
 
 using namespace std;
 
-Dense::Dense(int num_perceptrons){
-
-};
