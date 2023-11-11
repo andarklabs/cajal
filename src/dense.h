@@ -3,7 +3,10 @@
 
 #include <iostream>
 #include <stack>
+#include <vector>
 #include "perceptrons.h"
+
+typedef float Scalar;
 
 using namespace std;
 
@@ -14,6 +17,8 @@ public:
     ~Dense(); // Destuctor
 
     void cleanLayer(); 
+    void forwardProp();
+    void backwardProp();
 
 
     

@@ -1,3 +1,5 @@
+# for running with sphinx... unsure how well this will work...
+
 from cgitb import html
 
 extensions = [
