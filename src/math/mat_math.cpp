@@ -5,22 +5,28 @@
 
 #include <math.h>
 #include <iostream>
+#include <cassert>
 #include "mat_math.h"
 
 using namespace std;
 
 // create a tensor based off of the passed total information
-Tensor createTensor(unsigned int ti, Tensor t = NULL){
-
+Tensor createTensor(unsigned int ti, float data[] = NULL){
+    
     // initalized to 0. ti is all dimension sizes multiplied together
-    Tensor C = new float[ti];
+    Tensor C = new float[ti]();
+    
+    // 
+    if (data!=NULL){
+        C = data;
+    }
 
     return C;
 }
 
 // Add two Tensors together using their total informations
-Tensor add(Tensor A, Tensor B, unsigned int ti){
-    Tensor C = createTensor(ti);
+Tensor add(Tensor A, Tensor B, unsigned int ti, bool del = false){
+    Tensor C = new float[ti];
     
     unsigned int total_info = ti;
 
@@ -28,12 +34,17 @@ Tensor add(Tensor A, Tensor B, unsigned int ti){
         C[i] = A[i] + B[i];
     }
 
+    if (del){
+        delete A;
+        delete B;
+    }
+
 	return C;
 }
 
 // Subtract Tensor B from Tensor A using their total informations
-Tensor sub(Tensor A, Tensor B, unsigned int ti){
-    Tensor C = createTensor(ti);
+Tensor sub(Tensor A, Tensor B, unsigned int ti, bool del = false){
+    Tensor C = new float[ti];
     
     unsigned int total_info = ti;
 
@@ -41,16 +52,21 @@ Tensor sub(Tensor A, Tensor B, unsigned int ti){
         C[i] = A[i] - B[i];
     }
 
+    if (del){
+        delete A;
+        delete B;
+    }
+
 	return C;
 }
 
 // matrix A has n rows and p columns and matrix B has p rows and m columns. 
 // The resultant matrix is n*m
-Tensor naive_mult(Tensor A, Tensor B, mat_size n, mat_size m, mat_size p) {
+Tensor naive_mult(Tensor A, Tensor B, mat_size n, mat_size m, mat_size p, bool del = false) {
 
     float sum = 0;
 
-    Tensor C = createTensor(n*m); // resultant matrix has n*m total information
+    Tensor C = new float[n*m]; // resultant matrix has n*m total information
 
     for (int i = 0; i<n ; i++){ // for row in A
         for (int j = 0; j<m ; j++){ // for column in B
@@ -61,13 +77,18 @@ Tensor naive_mult(Tensor A, Tensor B, mat_size n, mat_size m, mat_size p) {
 			sum = 0;							
 		}
 	}
+    
+    // free memory A and B
+    delete A;
+    delete B;
+
 	return C;
 }
 
 // divide and conquer on square strassen 
-Tensor square_strassen(Tensor A, Tensor B, mat_size n){
+Tensor square_strassen(Tensor A, Tensor B, mat_size n, bool del = false){
 
-    Tensor C = createTensor(n);
+    Tensor C = new float[n];
 
     // this is our base case i'm implored to understand
 	if (n == 1) {
@@ -81,14 +102,14 @@ Tensor square_strassen(Tensor A, Tensor B, mat_size n){
     mat_size k = n/2;
 
     // we should create our sub matrices i guess
-    Tensor A11 = createTensor(k);
-    Tensor A12 = createTensor(k);
-    Tensor A21 = createTensor(k);
-    Tensor A22 = createTensor(k);
-    Tensor B11 = createTensor(k);
-    Tensor B12 = createTensor(k);
-    Tensor B21 = createTensor(k);
-    Tensor B22 = createTensor(k);
+    Tensor A11 = new float[k];
+    Tensor A12 = new float[k];
+    Tensor A21 = new float[k];
+    Tensor A22 = new float[k];
+    Tensor B11 = new float[k];
+    Tensor B12 = new float[k];
+    Tensor B21 = new float[k];
+    Tensor B22 = new float[k];
 
     // filling in our matrices. We are using row-major order so C[i * N + j]
     // means the ith row and the jth column
@@ -143,6 +164,27 @@ Tensor square_strassen(Tensor A, Tensor B, mat_size n){
 			C[((k + i) * k) + k + j] = C22[i * k + j];
 		}
 	}
+
+    // free memory A and B
+    delete A;
+    delete B;
+    delete P1; 
+	delete P2;
+	delete P3;
+	delete P4;
+	delete P5;	
+    delete P6;	
+    delete P7;
+    delete S1; 
+	delete S2;
+	delete S3;
+	delete S4;
+	delete S5;	
+    delete S6;	
+    delete S7;
+    delete S8;	
+    delete S9;	
+    delete S10;
 
 	// Return this matrix
 	return C;
