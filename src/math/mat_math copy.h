@@ -3,43 +3,53 @@
 
 // andark implementation of basic mat mult library
 
-#include <math.h>
+#ifndef MAT_MATH_H
+#define MAT_MATH_H
+
 #include <iostream>
-#include "mat_math.h"
+#include "math/tensor.h"
 
 using namespace std;
 
-// create a tensor based off of the passed total information
-Tensor createTensor(unsigned int ti){
 
-    // initalized to 0. ti is all dimension sizes multiplied together
-    Tensor C = new float[ti];
+// maybe we can employ this somehow:
+// template<int rows, int columns> using Matrix = int[rows*columns] *;
+
+// aliases
+using Tensor = float*;
+using shape = int*; // just number of dims with size of each dim after it 
+using mat_size = size_t;
+
+
+Tensor createMatrix(mat_size n, mat_size m = NULL){
+
+    // Check if we are working with square matrices
+    if (m == NULL){
+        m = n;
+    };
+
+    // not value initalized. 
+    Tensor C = new float[n*m];
 
     return C;
 }
 
-// Add two Tensors together using their total informations
-Tensor add(Tensor A, Tensor B, unsigned int ti){
-    Tensor C = createTensor(ti);
-    
-    unsigned int total_info = ti;
+Tensor add(Tensor A, Tensor B, mat_size n){
+    Tensor C = createMatrix(n);
 
-    for (unsigned int i = 0; i < total_info; i++){
-        C[i] = A[i] + B[i];
-    }
+	for (unsigned int i = 0; i < n; i++)
+		for (unsigned int j = 0; j < n; j++)
+			C[(i * n) + j] = A[(i * n) + j] + B[(i * n) + j];
 
 	return C;
 }
 
-// Subtract Tensor B from Tensor A using their total informations
-Tensor sub(Tensor A, Tensor B, unsigned int ti){
-    Tensor C = createTensor(ti);
-    
-    unsigned int total_info = ti;
+Tensor sub(Tensor A, Tensor B, mat_size n){
+    Tensor C = createMatrix(n);
 
-    for (unsigned int i = 0; i < total_info; i++){
-        C[i] = A[i] - B[i];
-    }
+	for (unsigned int i = 0; i < n; i++)
+		for (unsigned int j = 0; j < n; j++)
+			C[(i * n) + j] = A[(i * n) + j] - B[(i * n) + j];
 
 	return C;
 }
@@ -47,27 +57,26 @@ Tensor sub(Tensor A, Tensor B, unsigned int ti){
 // matrix A has n rows and p columns and matrix B has p rows and m columns. 
 // The resultant matrix is n*m
 Tensor naive_mult(Tensor A, Tensor B, mat_size n, mat_size m, mat_size p) {
-
     float sum = 0;
-
-    Tensor C = createTensor(n*m); // resultant matrix has n*m total information
-
-    for (int i = 0; i<n ; i++){ // for row in A
-        for (int j = 0; j<m ; j++){ // for column in B
-            for (int k = 0; k<p ; k++){ // for column in A / row in B
-                sum += A[(i * p) + k] * B[(k * m) + j];				
+    Tensor C = createMatrix(n,p);
+    for (int i = 0; i<n ; i++){
+        for (int j = 0; j<m ; j++){
+            for (int k = 0; k<p ; k++){
+                sum += A[(i * p) + k] * B[(k * m) + j];				// O(1)
 			}
-			C[(i * m) + j] = sum;							
-			sum = 0;							
+			C[(i * m) + j] = sum;							// O(1)
+			sum = 0;							// O(1)
 		}
 	}
 	return C;
 }
 
+
 // divide and conquer on square strassen 
 Tensor square_strassen(Tensor A, Tensor B, mat_size n){
+// TODO: Fill in with square strassen implementation
 
-    Tensor C = createTensor(n);
+    Tensor C = createMatrix(n);
 
     // this is our base case i'm implored to understand
 	if (n == 1) {
@@ -77,24 +86,23 @@ Tensor square_strassen(Tensor A, Tensor B, mat_size n){
 		return C;
 	}
 
-    // sub Tensor size 
+    // sub matrix size 
     mat_size k = n/2;
 
     // we should create our sub matrices i guess
-    Tensor A11 = createTensor(k);
-    Tensor A12 = createTensor(k);
-    Tensor A21 = createTensor(k);
-    Tensor A22 = createTensor(k);
-    Tensor B11 = createTensor(k);
-    Tensor B12 = createTensor(k);
-    Tensor B21 = createTensor(k);
-    Tensor B22 = createTensor(k);
+    Tensor A11 = createMatrix(k);
+    Tensor A12 = createMatrix(k);
+    Tensor A21 = createMatrix(k);
+    Tensor A22 = createMatrix(k);
+    Tensor B11 = createMatrix(k);
+    Tensor B12 = createMatrix(k);
+    Tensor B21 = createMatrix(k);
+    Tensor B22 = createMatrix(k);
 
     // filling in our matrices. We are using row-major order so C[i * N + j]
     // means the ith row and the jth column
     for (unsigned int i = 0; i < k; i++) {
             for (unsigned j = 0; j < k; j++) {
-                
                 A11[i * k + j] = A[i * k + j];
                 A12[i * k + j] = A[(i * k) + k + j];		
                 A21[i * k + j] = A[((k + i) * k) + j];
@@ -138,8 +146,11 @@ Tensor square_strassen(Tensor A, Tensor B, mat_size n){
 		for (unsigned int j = 0; j < k; j++) {
 
 			C[i * k + j] = C11[i * k + j];
+
 			C[(i * k) + k + j] = C12[i * k + j];
+
 			C[((k + i) * k) + j] = C21[i * k + j];
+
 			C[((k + i) * k) + k + j] = C22[i * k + j];
 		}
 	}
@@ -149,3 +160,5 @@ Tensor square_strassen(Tensor A, Tensor B, mat_size n){
 
 
 }
+
+#endif

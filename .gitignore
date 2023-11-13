@@ -11,6 +11,9 @@ citadel.cpp
 #ignore my play areas
 playground*
 
+# ignore docs generator programs and files
+ext
+
 # Compiled Object files
 *.slo
 *.lo
