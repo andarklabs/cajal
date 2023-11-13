@@ -11,7 +11,7 @@ using namespace std;
 // aliases
 using Tensor = float*;
 using mat_size = size_t;
-using shape = unsigned int*; // [dims, total_information, size_of_d_1, ... , size_of_d_dims]. 
+using shape = unsigned int *; // [dims, total_information, size_of_d_1, ... , size_of_d_dims]. 
 
 // create a tensor based off of the passed total information
 Tensor createTensor(unsigned int ti);

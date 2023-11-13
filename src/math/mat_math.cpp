@@ -10,7 +10,7 @@
 using namespace std;
 
 // create a tensor based off of the passed total information
-Tensor createTensor(unsigned int ti){
+Tensor createTensor(unsigned int ti, Tensor t = NULL){
 
     // initalized to 0. ti is all dimension sizes multiplied together
     Tensor C = new float[ti];
@@ -94,7 +94,7 @@ Tensor square_strassen(Tensor A, Tensor B, mat_size n){
     // means the ith row and the jth column
     for (unsigned int i = 0; i < k; i++) {
             for (unsigned j = 0; j < k; j++) {
-                
+
                 A11[i * k + j] = A[i * k + j];
                 A12[i * k + j] = A[(i * k) + k + j];		
                 A21[i * k + j] = A[((k + i) * k) + j];

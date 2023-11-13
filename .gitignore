@@ -10,6 +10,8 @@ citadel.cpp
 
 #ignore my play areas
 playground*
+andrew*
+UNUSED
 
 # ignore docs generator programs and files
 ext
