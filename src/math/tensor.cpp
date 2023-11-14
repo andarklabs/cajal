@@ -1,9 +1,4 @@
 #include "tensor.h"
-#include <cstring>
-#include <iomanip> // for set_precision
-#include <iostream>
-#include <math.h>
-#include <sstream> // for stringstream
 
 using namespace std;
 

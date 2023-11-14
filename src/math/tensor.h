@@ -3,6 +3,10 @@
 
 #include <iostream>
 #include <string>
+#include <cstring>
+#include <iomanip> // for set_precision
+#include <math.h>
+#include <sstream> // for stringstream
 
 class Tensor {
 
@@ -19,7 +23,7 @@ public:
   // what float* not *data?
   // style.
   float *data() const;
-  string toString();
+  std::string toString();
 
   static Tensor zeros(unsigned int rows, unsigned int cols);
 

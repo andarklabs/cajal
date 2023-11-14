@@ -5,6 +5,7 @@ using Matrix = float*;
 
 using namespace std;
 
+// Rectified linear unit on 2d matrix
 void relu(Matrix m, unsigned int ti) {
 
   for (int i = 0; i < ti; i++) {

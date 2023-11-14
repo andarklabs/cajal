@@ -22,7 +22,5 @@ public:
     
 private:
 
-    stack<Perceptron*> layerStack;
-
 };
 #endif

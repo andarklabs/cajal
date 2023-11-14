@@ -12,6 +12,7 @@ citadel.cpp
 playground*
 andrew*
 UNUSED
+executive*
 
 # ignore docs generator programs and files
 ext

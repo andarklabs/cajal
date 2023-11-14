@@ -21,7 +21,7 @@ void toStr(Matrix m, unsigned int r, unsigned int c) {
 }
 
 // Add two Matrices together using their total informations
-Matrix add(Matrix A, Matrix B, unsigned int ti, bool del = false){
+Matrix add(Matrix A, Matrix B, unsigned int ti, bool del /* = false */){
     Matrix C = new float[ti];
     
     unsigned int total_info = ti;
@@ -32,15 +32,15 @@ Matrix add(Matrix A, Matrix B, unsigned int ti, bool del = false){
 
     if (del){
         // free memory A and B
-        delete A;
-        delete B;
+        delete[] A;
+        delete[] B;
     }
 
 	return C;
 }
 
 // Subtract Matrix B from Matrix A using their total informations
-Matrix sub(Matrix A, Matrix B, unsigned int ti, bool del = false){
+Matrix sub(Matrix A, Matrix B, unsigned int ti, bool del /* = false */){
     Matrix C = new float[ti];
     
     unsigned int total_info = ti;
@@ -51,8 +51,8 @@ Matrix sub(Matrix A, Matrix B, unsigned int ti, bool del = false){
 
     if (del){
         // free memory A and B
-        delete A;
-        delete B;
+        delete[] A;
+        delete[] B;
     }
 
 	return C;
@@ -60,7 +60,7 @@ Matrix sub(Matrix A, Matrix B, unsigned int ti, bool del = false){
 
 // matrix A has n rows and p columns and matrix B has p rows and m columns. 
 // The resultant matrix is n*m
-Matrix naive_mult(Matrix A, Matrix B, mat_size n, mat_size m, mat_size p, bool del = false) {
+Matrix naive_mult(Matrix A, Matrix B, mat_size n, mat_size m, mat_size p, bool del /* = false */) {
 
     float sum = 0;
 
@@ -78,15 +78,15 @@ Matrix naive_mult(Matrix A, Matrix B, mat_size n, mat_size m, mat_size p, bool d
     
     if (del){
         // free memory A and B
-        delete A;
-        delete B;
+        delete[] A;
+        delete[] B;
     }
 
 	return C;
 }
 
 // divide and conquer on square strassen 
-Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del = false){
+Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del /* = false */){
 
     Matrix C = new float[n];
 
@@ -139,7 +139,7 @@ Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del = false){
 	Matrix S9 = sub(A11, A21, k);
 	Matrix S10 = add(B11, B12, k);
 
-	// P - also we can delete all S matrices right here
+	// P - also we can delete[] all S matrices right here
 	Matrix P1 = square_strassen(A11, S1, k, true);
 	Matrix P2 = square_strassen(S2, B22, k, true);
 	Matrix P3 = square_strassen(S3, B11, k, true);
@@ -169,30 +169,30 @@ Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del = false){
 
     if (del){
         // free memory A and B
-        delete A;
-        delete B;
+        delete[] A;
+        delete[] B;
     }
 
-    // delete remaining base matrices
-    delete A12; 
-	delete A21;
-	delete B12;
-	delete B21;
+    // delete[] remaining base matrices
+    delete[] A12; 
+	delete[] A21;
+	delete[] B12;
+	delete[] B21;
 
-    // delete all P matrices
-    delete P1; 
-	delete P2;
-	delete P3;
-	delete P4;
-	delete P5;	
-    delete P6;	
-    delete P7;
+    // delete[] all P matrices
+    delete[] P1; 
+	delete[] P2;
+	delete[] P3;
+	delete[] P4;
+	delete[] P5;	
+    delete[] P6;	
+    delete[] P7;
 
-    // delete our C quadrants
-    delete C11; 
-	delete C12;
-	delete C21;
-	delete C22;
+    // delete[] our C quadrants
+    delete[] C11; 
+	delete[] C12;
+	delete[] C21;
+	delete[] C22;
 
 	// Return this matrix
 	return C;
