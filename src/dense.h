@@ -8,8 +8,6 @@
 
 typedef float Scalar;
 
-using namespace std;
-
 class Dense{
 
 public:

@@ -10,23 +10,19 @@
 
 using namespace std;
 
-// create a tensor based off of the passed total information
-Tensor createTensor(unsigned int ti, float data[] = NULL){
-    
-    // initalized to 0. ti is all dimension sizes multiplied together
-    Tensor C = new float[ti]();
-    
-    // 
-    if (data!=NULL){
-        C = data;
-    }
+void toStr(Matrix m, unsigned int r, unsigned int c) {
 
-    return C;
+  for (int i = 0; i < r; i++) { // for num_dimensions
+    for (int j = 0; j < c; j++) { // for size of each dimension
+        cout<<m[(i * c) + j]<<" ";
+    }
+    cout<< '\n';
+  }
 }
 
-// Add two Tensors together using their total informations
-Tensor add(Tensor A, Tensor B, unsigned int ti, bool del = false){
-    Tensor C = new float[ti];
+// Add two Matrices together using their total informations
+Matrix add(Matrix A, Matrix B, unsigned int ti, bool del = false){
+    Matrix C = new float[ti];
     
     unsigned int total_info = ti;
 
@@ -35,6 +31,7 @@ Tensor add(Tensor A, Tensor B, unsigned int ti, bool del = false){
     }
 
     if (del){
+        // free memory A and B
         delete A;
         delete B;
     }
@@ -42,9 +39,9 @@ Tensor add(Tensor A, Tensor B, unsigned int ti, bool del = false){
 	return C;
 }
 
-// Subtract Tensor B from Tensor A using their total informations
-Tensor sub(Tensor A, Tensor B, unsigned int ti, bool del = false){
-    Tensor C = new float[ti];
+// Subtract Matrix B from Matrix A using their total informations
+Matrix sub(Matrix A, Matrix B, unsigned int ti, bool del = false){
+    Matrix C = new float[ti];
     
     unsigned int total_info = ti;
 
@@ -53,6 +50,7 @@ Tensor sub(Tensor A, Tensor B, unsigned int ti, bool del = false){
     }
 
     if (del){
+        // free memory A and B
         delete A;
         delete B;
     }
@@ -62,11 +60,11 @@ Tensor sub(Tensor A, Tensor B, unsigned int ti, bool del = false){
 
 // matrix A has n rows and p columns and matrix B has p rows and m columns. 
 // The resultant matrix is n*m
-Tensor naive_mult(Tensor A, Tensor B, mat_size n, mat_size m, mat_size p, bool del = false) {
+Matrix naive_mult(Matrix A, Matrix B, mat_size n, mat_size m, mat_size p, bool del = false) {
 
     float sum = 0;
 
-    Tensor C = new float[n*m]; // resultant matrix has n*m total information
+    Matrix C = new float[n*m]; // resultant matrix has n*m total information
 
     for (int i = 0; i<n ; i++){ // for row in A
         for (int j = 0; j<m ; j++){ // for column in B
@@ -78,17 +76,19 @@ Tensor naive_mult(Tensor A, Tensor B, mat_size n, mat_size m, mat_size p, bool d
 		}
 	}
     
-    // free memory A and B
-    delete A;
-    delete B;
+    if (del){
+        // free memory A and B
+        delete A;
+        delete B;
+    }
 
 	return C;
 }
 
 // divide and conquer on square strassen 
-Tensor square_strassen(Tensor A, Tensor B, mat_size n, bool del = false){
+Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del = false){
 
-    Tensor C = new float[n];
+    Matrix C = new float[n];
 
     // this is our base case i'm implored to understand
 	if (n == 1) {
@@ -98,18 +98,18 @@ Tensor square_strassen(Tensor A, Tensor B, mat_size n, bool del = false){
 		return C;
 	}
 
-    // sub Tensor size 
+    // sub Matrix size 
     mat_size k = n/2;
 
     // we should create our sub matrices i guess
-    Tensor A11 = new float[k];
-    Tensor A12 = new float[k];
-    Tensor A21 = new float[k];
-    Tensor A22 = new float[k];
-    Tensor B11 = new float[k];
-    Tensor B12 = new float[k];
-    Tensor B21 = new float[k];
-    Tensor B22 = new float[k];
+    Matrix A11 = new float[k];
+    Matrix A12 = new float[k];
+    Matrix A21 = new float[k];
+    Matrix A22 = new float[k];
+    Matrix B11 = new float[k];
+    Matrix B12 = new float[k];
+    Matrix B21 = new float[k];
+    Matrix B22 = new float[k];
 
     // filling in our matrices. We are using row-major order so C[i * N + j]
     // means the ith row and the jth column
@@ -128,31 +128,31 @@ Tensor square_strassen(Tensor A, Tensor B, mat_size n, bool del = false){
 	}
     
     // S
-	Tensor S1 = sub(B12, B22, k);
-	Tensor S2 = add(A11, A12, k);
-	Tensor S3 = add(A21, A22, k);
-	Tensor S4 = sub(B21, B11, k);
-	Tensor S5 = add(A11, A22, k);
-	Tensor S6 = add(B11, B22, k);
-	Tensor S7 = sub(A12, A22, k);
-	Tensor S8 = add(B21, B22, k);
-	Tensor S9 = sub(A11, A21, k);
-	Tensor S10 = add(B11, B12, k);
+	Matrix S1 = sub(B12, B22, k);
+	Matrix S2 = add(A11, A12, k);
+	Matrix S3 = add(A21, A22, k);
+	Matrix S4 = sub(B21, B11, k);
+	Matrix S5 = add(A11, A22, k);
+	Matrix S6 = add(B11, B22, k);
+	Matrix S7 = sub(A12, A22, k);
+	Matrix S8 = add(B21, B22, k);
+	Matrix S9 = sub(A11, A21, k);
+	Matrix S10 = add(B11, B12, k);
 
-	// P
-	Tensor P1 = square_strassen(A11, S1, k);
-	Tensor P2 = square_strassen(S2, B22, k);
-	Tensor P3 = square_strassen(S3, B11, k);
-	Tensor P4 = square_strassen(A22, S4, k);
-	Tensor P5 = square_strassen(S5, S6, k);
-	Tensor P6 = square_strassen(S7, S8, k);
-	Tensor P7 = square_strassen(S9, S10, k);
+	// P - also we can delete all S matrices right here
+	Matrix P1 = square_strassen(A11, S1, k, true);
+	Matrix P2 = square_strassen(S2, B22, k, true);
+	Matrix P3 = square_strassen(S3, B11, k, true);
+	Matrix P4 = square_strassen(A22, S4, k, true);
+	Matrix P5 = square_strassen(S5, S6, k, true);
+	Matrix P6 = square_strassen(S7, S8, k, true);
+	Matrix P7 = square_strassen(S9, S10, k, true);
 
 	// C submatrices
-	Tensor C11 = sub(add(add(P5, P4, k), P6, k), P2, k);				// P5 + P4 - P2 + P6
-	Tensor C12 = add(P1, P2, k);								        // P1 + P2
-	Tensor C21 = add(P3, P4, k);								        // P3 + P4
-	Tensor C22 = sub(sub(add(P5, P1, k), P3, k), P7, k);				// P1 + P5 - P3 - P7
+	Matrix C11 = sub(add(add(P5, P4, k), P6, k), P2, k);				// P5 + P4 - P2 + P6
+	Matrix C12 = add(P1, P2, k);								        // P1 + P2
+	Matrix C21 = add(P3, P4, k);								        // P3 + P4
+	Matrix C22 = sub(sub(add(P5, P1, k), P3, k), P7, k);				// P1 + P5 - P3 - P7
 
 	// build our C matrix										
 	for (unsigned int i = 0; i < k; i++) {
@@ -165,9 +165,21 @@ Tensor square_strassen(Tensor A, Tensor B, mat_size n, bool del = false){
 		}
 	}
 
-    // free memory A and B
-    delete A;
-    delete B;
+    // ----------- time to free memory ------------
+
+    if (del){
+        // free memory A and B
+        delete A;
+        delete B;
+    }
+
+    // delete remaining base matrices
+    delete A12; 
+	delete A21;
+	delete B12;
+	delete B21;
+
+    // delete all P matrices
     delete P1; 
 	delete P2;
 	delete P3;
@@ -175,16 +187,12 @@ Tensor square_strassen(Tensor A, Tensor B, mat_size n, bool del = false){
 	delete P5;	
     delete P6;	
     delete P7;
-    delete S1; 
-	delete S2;
-	delete S3;
-	delete S4;
-	delete S5;	
-    delete S6;	
-    delete S7;
-    delete S8;	
-    delete S9;	
-    delete S10;
+
+    // delete our C quadrants
+    delete C11; 
+	delete C12;
+	delete C21;
+	delete C22;
 
 	// Return this matrix
 	return C;
