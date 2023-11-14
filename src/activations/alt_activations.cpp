@@ -15,11 +15,21 @@ void relu(Matrix m, unsigned int ti) {
     }
 }
 
+// Rectified linear unit on 2d matrix
+void lrelu(Matrix m, unsigned int ti, float alpha /* = 0.3 */) {
+
+  for (int i = 0; i < ti; i++) {
+      if (m[i] < 0) {
+        m[i] *= alpha;
+      }
+    }
+}
+
 int main() {
     unsigned int s[] = {2,6,2,3}; // 2d 6ti 2r 3c
-    float T[] = {4,5,7,8,10,12}; // [[4,5,7],[8,10,12]]
+    float T[] = {4,5,-7,8,10,12}; // [[4,5,7],[8,10,12]]
     Matrix test = T;
-    relu(test, s[1]);
+    lrelu(test, s[1]);
     toStr(test, s[2], s[3]); // defined in mat_math.cpp 
     return 0;
 }
