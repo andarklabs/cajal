@@ -165,7 +165,7 @@ Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del /* = false */){
 		}
 	}
 
-    // ----------- time to free memory ------------
+    // ----------- time to free memory ------------ //
 
     if (del){
         // free memory A and B
