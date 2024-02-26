@@ -50,8 +50,14 @@ void softmax(Matrix m, unsigned int ti){
 }
 
 void tanh(Matrix m, unsigned int ti){
-  for (unsigned int i = 0; i < ti; i++ ){
+  for (unsigned int i = 0; i < ti; i++){
     m[i] = (2 / (1 + expf(-2 * m[i]) ) ) - 1;
+  }
+}
+
+void sigmoid(Matrix m, unsigned int ti){
+  for (unsigned int i = 0; i < ti; i++){
+    m[i] =  1 / (1 + expf(-m[i]) );
   }
 }
 
