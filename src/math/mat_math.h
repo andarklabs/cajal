@@ -8,7 +8,7 @@
 // aliases
 using Matrix = float*;
 using mat_size = size_t;
-using shape = unsigned int *; // [dims, total_information, size_of_d_1, ... , size_of_d_dims]. 
+using shape = unsigned int*; // [dims, total_information, size_of_d_1, ... , size_of_d_dims]. 
 
 // prints out contents of matrix
 void toStr(Matrix A, unsigned int r, unsigned int c);

@@ -90,7 +90,7 @@ Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del /* = false */){
 
     Matrix C = new float[n];
 
-    // this is our base case i'm implored to understand
+    // this is our base case
 	if (n == 1) {
 
         C[0] = A[0] * B[0];
@@ -101,7 +101,7 @@ Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del /* = false */){
     // sub Matrix size 
     mat_size k = n/2;
 
-    // we should create our sub matrices i guess
+    // we should create our sub matrices 
     Matrix A11 = new float[k];
     Matrix A12 = new float[k];
     Matrix A21 = new float[k];
@@ -139,7 +139,8 @@ Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del /* = false */){
 	Matrix S9 = sub(A11, A21, k);
 	Matrix S10 = add(B11, B12, k);
 
-	// P - also we can delete[] all S matrices right here
+	// P - also we can delete all S matrices right here 
+    // along with A11, A22, B11, and B22
 	Matrix P1 = square_strassen(A11, S1, k, true);
 	Matrix P2 = square_strassen(S2, B22, k, true);
 	Matrix P3 = square_strassen(S3, B11, k, true);

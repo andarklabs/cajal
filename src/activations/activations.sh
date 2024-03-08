@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Set the project directory
-project_dir="/Users/macuser/Desktop/projects/cajal/src/"
+project_dir="/Users/andrewceniccola/Desktop/cajal/src/"
 
 # Compilation command with c++11, no version warnings, -I option and access to our innate files and gives access to mat_math.cpp and throws errors to terminal
 cd "$project_dir" && g++ -std=c++11 -Wc++11-extensions -I./math activations/alt_activations.cpp math/mat_math.cpp -o activations/executive 2>&1

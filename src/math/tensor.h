@@ -12,7 +12,7 @@ class Tensor {
 
 public:
   // initialize the tensor
-  Tensor(unsigned int rows, unsigned int cols, float *data = nullptr);
+  Tensor(unsigned int rows, unsigned int cols, float* data = nullptr);
 
   // return the tensor
   Tensor copy();
@@ -20,9 +20,11 @@ public:
   // allow access to data
   unsigned int cols() const;
   unsigned int rows() const;
-  // what float* not *data?
-  // style.
-  float *data() const;
+  // q: what float* not *data? 
+  // a: float* is the type and data is the function name. 
+  // float* means that it is a memory location that holds a float 
+  // (a pointer to a float)
+  float* data() const;
   std::string toString();
 
   static Tensor zeros(unsigned int rows, unsigned int cols);
@@ -30,7 +32,7 @@ public:
   // static method
 
 private:
-  float *m_data;
+  float* m_data;
   unsigned int m_rows;
   unsigned int m_cols;
 };
