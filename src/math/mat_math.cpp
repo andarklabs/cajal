@@ -6,7 +6,7 @@
 #include <math.h>
 #include <iostream>
 #include <cassert>
-#include "mat_math.h"
+#include "mat_math.hpp"
 
 using namespace std;
 

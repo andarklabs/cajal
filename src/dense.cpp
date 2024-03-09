@@ -1,9 +1,9 @@
 #include <math.h>
 #include <iostream>
-#include "dense.h"
+#include "dense.hpp"
 
 using namespace std;
 
-Dense::Dense(int num_perceptrons){
+int* forwardProp(){
 
-};
+}

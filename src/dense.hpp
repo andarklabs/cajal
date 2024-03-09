@@ -4,18 +4,19 @@
 #include <iostream>
 #include <stack>
 #include <vector>
-#include "perceptrons.h"
 
 typedef float Scalar;
 
 class Dense{
 
 public:
-    Dense(int num_perceptrons); // Constructor
+    // Constructor creates inital weights and biases for one layer
+    Dense(int num_perceptrons, int num_inputs); 
+    
     ~Dense(); // Destuctor
 
     void cleanLayer(); 
-    void forwardProp();
+    int* forwardProp(); // returns an integer array representing the layer
     void backwardProp();
 
 

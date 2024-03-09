@@ -6,7 +6,7 @@
 
 using Matrix = float*;
 
-//ptr activate(string fn); /* This */
+//TODO: int activate(string fn, Matrix m, unsigned int ti, float alpha = 0.0); /* This is a funtion that finds and calls your function that's name is your string */ 
 
 void relu(Matrix m, unsigned int ti);
 

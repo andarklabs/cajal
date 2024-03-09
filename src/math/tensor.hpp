@@ -22,8 +22,10 @@ public:
   unsigned int rows() const;
   // q: what float* not *data? 
   // a: float* is the type and data is the function name. 
-  // float* means that it is a memory location that holds a float 
-  // (a pointer to a float)
+  // I'm following the convention where type is on the left 
+  // and varible on the right. There is no single agreed upon 
+  // convention for this. It is a bit of a holy war. vsc likes it when I do
+  // float* rather than float *data or float * data so I do it this way
   float* data() const;
   std::string toString();
 

@@ -1,5 +1,5 @@
-#include "alt_activations.h"
-#include "mat_math.h"
+#include "activations.hpp"
+#include "mat_math.hpp"
 
 using Matrix = float*;
 
@@ -66,15 +66,7 @@ int main() {
   float T[] = {4,5,-7,8,10,12}; // [[4,5,7],[8,10,12]]
   Matrix test = T;
   relu(test, s[1]);
-  toStr(test, s[2], s[3]); 
-  lrelu(test, s[1]);
-  toStr(test, s[2], s[3]);
-  softmax(test, s[1]);
-  toStr(test, s[2], s[3]);
-  tanh(test, s[1]);
-  toStr(test, s[2], s[3]); 
-  sigmoid(test, s[1]);
   toStr(test, s[2], s[3]); // defined in mat_math.cpp
-  toStr(T,s[2],s[3]);
+  toStr(T,s[2],s[3]); // T is also changing
   return 0;
 }
