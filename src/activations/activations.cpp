@@ -8,7 +8,7 @@ using namespace std;
 // All these functions have inputs 'm' that are changed dynamically
 
 // Rectified linear unit on vector
-void relu(Matrix m, unsigned int ti) {
+void Relu(Matrix m, unsigned int ti) {
 
   for (int i = 0; i < ti; i++) {
       if (m[i] < 0) {
@@ -18,7 +18,7 @@ void relu(Matrix m, unsigned int ti) {
 }
 
 // Leaky rectified linear unit on vector
-void lrelu(Matrix m, unsigned int ti, float alpha /* = 0.3 */) {
+void Lrelu(Matrix m, unsigned int ti, float alpha /* = 0.3 */) {
 
   for (int i = 0; i < ti; i++) {
       if (m[i] < 0) {
@@ -28,7 +28,7 @@ void lrelu(Matrix m, unsigned int ti, float alpha /* = 0.3 */) {
 }
 
 // 
-void softmax(Matrix m, unsigned int ti){
+void Softmax(Matrix m, unsigned int ti){
 
   float mx = -INFINITY;
   for (unsigned int i=0; i<ti;i++){
@@ -49,13 +49,13 @@ void softmax(Matrix m, unsigned int ti){
 
 }
 
-void tanh(Matrix m, unsigned int ti){
+void Tanh(Matrix m, unsigned int ti){
   for (unsigned int i = 0; i < ti; i++){
     m[i] = (2 / (1 + expf(-2 * m[i]) ) ) - 1;
   }
 }
 
-void sigmoid(Matrix m, unsigned int ti){
+void Sigmoid(Matrix m, unsigned int ti){
   for (unsigned int i = 0; i < ti; i++){
     m[i] =  1 / (1 + expf(-m[i]) );
   }
@@ -63,10 +63,10 @@ void sigmoid(Matrix m, unsigned int ti){
 
 int main() {
   unsigned int s[] = {2,6,2,3}; // 2d 6ti 2r 3c
-  float T[] = {4,5,-7,8,10,12}; // [[4,5,7],[8,10,12]]
-  Matrix test = T;
-  relu(test, s[1]);
-  toStr(test, s[2], s[3]); // defined in mat_math.cpp
-  toStr(T,s[2],s[3]); // T is also changing
+  float test[] = {4,5,-7,8,10,12}; // [[4,5,7],[8,10,12]]
+  Matrix M = MatInit(0,6);
+  ToStr(M, s[2], s[3]);
+  Relu(test, s[1]);
+  ToStr(test, s[2], s[3]); // defined in mat_math.cpp
   return 0;
 }

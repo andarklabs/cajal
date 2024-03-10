@@ -2,7 +2,6 @@
 #define CAJAL_H
 
 #include <iostream>
-#include "math/tensor.hpp"
 
 class Cajal{
 

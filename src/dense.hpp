@@ -4,6 +4,8 @@
 #include <iostream>
 #include <stack>
 #include <vector>
+#include <string>
+#include <math.h>
 
 typedef float Scalar;
 
@@ -11,17 +13,21 @@ class Dense{
 
 public:
     // Constructor creates inital weights and biases for one layer
-    Dense(int num_perceptrons, int num_inputs); 
+    Dense(unsigned int num_inputs, unsigned int num_outputs, const std::string activation); 
     
     ~Dense(); // Destuctor
 
-    void cleanLayer(); 
-    int* forwardProp(); // returns an integer array representing the layer
-    void backwardProp();
-
-
+    float* ForwardProp(float* inputs); // returns a float array representing the layer
     
+    void BackwardProp(float loss);
+
 private:
+
+    float* weights;
+    float* biases;
+    unsigned int num_inputs;
+    unsigned int num_outputs;
+    unsigned int num_weights;
 
 };
 #endif

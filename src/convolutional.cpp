@@ -1,5 +1,5 @@
 #include <math.h>
 #include <iostream>
-#include "convolutional.h"
+#include "convolutional.hpp"
 
 using namespace std;

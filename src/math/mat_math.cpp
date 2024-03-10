@@ -3,14 +3,11 @@
 
 // andark implementation of basic mat mult library
 
-#include <math.h>
-#include <iostream>
-#include <cassert>
 #include "mat_math.hpp"
 
 using namespace std;
 
-void toStr(Matrix m, unsigned int r, unsigned int c) {
+void ToStr(Matrix m, unsigned int r, unsigned int c) {
 
   for (int i = 0; i < r; i++) { // for num_dimensions
     for (int j = 0; j < c; j++) { // for size of each dimension
@@ -21,7 +18,7 @@ void toStr(Matrix m, unsigned int r, unsigned int c) {
 }
 
 // Add two Matrices together using their total informations
-Matrix add(Matrix A, Matrix B, unsigned int ti, bool del /* = false */){
+Matrix Add(Matrix A, Matrix B, unsigned int ti, bool del /* = false */){
     Matrix C = new float[ti];
     
     unsigned int total_info = ti;
@@ -40,7 +37,7 @@ Matrix add(Matrix A, Matrix B, unsigned int ti, bool del /* = false */){
 }
 
 // Subtract Matrix B from Matrix A using their total informations
-Matrix sub(Matrix A, Matrix B, unsigned int ti, bool del /* = false */){
+Matrix Sub(Matrix A, Matrix B, unsigned int ti, bool del /* = false */){
     Matrix C = new float[ti];
     
     unsigned int total_info = ti;
@@ -60,7 +57,7 @@ Matrix sub(Matrix A, Matrix B, unsigned int ti, bool del /* = false */){
 
 // matrix A has n rows and p columns and matrix B has p rows and m columns. 
 // The resultant matrix is n*m
-Matrix naive_mult(Matrix A, Matrix B, mat_size n, mat_size m, mat_size p, bool del /* = false */) {
+Matrix NaiveMult(Matrix A, Matrix B, mat_size n, mat_size m, mat_size p, bool del /* = false */) {
 
     float sum = 0;
 
@@ -86,7 +83,7 @@ Matrix naive_mult(Matrix A, Matrix B, mat_size n, mat_size m, mat_size p, bool d
 }
 
 // divide and conquer on square strassen 
-Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del /* = false */){
+Matrix SquareStrassen(Matrix A, Matrix B, mat_size n, bool del /* = false */){
 
     Matrix C = new float[n];
 
@@ -98,10 +95,10 @@ Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del /* = false */){
 		return C;
 	}
 
-    // sub Matrix size 
+    // Sub Matrix size 
     mat_size k = n/2;
 
-    // we should create our sub matrices 
+    // we should create our Sub matrices 
     Matrix A11 = new float[k];
     Matrix A12 = new float[k];
     Matrix A21 = new float[k];
@@ -128,32 +125,32 @@ Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del /* = false */){
 	}
     
     // S
-	Matrix S1 = sub(B12, B22, k);
-	Matrix S2 = add(A11, A12, k);
-	Matrix S3 = add(A21, A22, k);
-	Matrix S4 = sub(B21, B11, k);
-	Matrix S5 = add(A11, A22, k);
-	Matrix S6 = add(B11, B22, k);
-	Matrix S7 = sub(A12, A22, k);
-	Matrix S8 = add(B21, B22, k);
-	Matrix S9 = sub(A11, A21, k);
-	Matrix S10 = add(B11, B12, k);
+	Matrix S1 = Sub(B12, B22, k);
+	Matrix S2 = Add(A11, A12, k);
+	Matrix S3 = Add(A21, A22, k);
+	Matrix S4 = Sub(B21, B11, k);
+	Matrix S5 = Add(A11, A22, k);
+	Matrix S6 = Add(B11, B22, k);
+	Matrix S7 = Sub(A12, A22, k);
+	Matrix S8 = Add(B21, B22, k);
+	Matrix S9 = Sub(A11, A21, k);
+	Matrix S10 = Add(B11, B12, k);
 
 	// P - also we can delete all S matrices right here 
     // along with A11, A22, B11, and B22
-	Matrix P1 = square_strassen(A11, S1, k, true);
-	Matrix P2 = square_strassen(S2, B22, k, true);
-	Matrix P3 = square_strassen(S3, B11, k, true);
-	Matrix P4 = square_strassen(A22, S4, k, true);
-	Matrix P5 = square_strassen(S5, S6, k, true);
-	Matrix P6 = square_strassen(S7, S8, k, true);
-	Matrix P7 = square_strassen(S9, S10, k, true);
+	Matrix P1 = SquareStrassen(A11, S1, k, true);
+	Matrix P2 = SquareStrassen(S2, B22, k, true);
+	Matrix P3 = SquareStrassen(S3, B11, k, true);
+	Matrix P4 = SquareStrassen(A22, S4, k, true);
+	Matrix P5 = SquareStrassen(S5, S6, k, true);
+	Matrix P6 = SquareStrassen(S7, S8, k, true);
+	Matrix P7 = SquareStrassen(S9, S10, k, true);
 
-	// C submatrices
-	Matrix C11 = sub(add(add(P5, P4, k), P6, k), P2, k);				// P5 + P4 - P2 + P6
-	Matrix C12 = add(P1, P2, k);								        // P1 + P2
-	Matrix C21 = add(P3, P4, k);								        // P3 + P4
-	Matrix C22 = sub(sub(add(P5, P1, k), P3, k), P7, k);				// P1 + P5 - P3 - P7
+	// C Submatrices
+	Matrix C11 = Sub(Add(Add(P5, P4, k), P6, k), P2, k);				// P5 + P4 - P2 + P6
+	Matrix C12 = Add(P1, P2, k);								        // P1 + P2
+	Matrix C21 = Add(P3, P4, k);								        // P3 + P4
+	Matrix C22 = Sub(Sub(Add(P5, P1, k), P3, k), P7, k);				// P1 + P5 - P3 - P7
 
 	// build our C matrix										
 	for (unsigned int i = 0; i < k; i++) {
@@ -198,5 +195,32 @@ Matrix square_strassen(Matrix A, Matrix B, mat_size n, bool del /* = false */){
 	// Return this matrix
 	return C;
 
+
+}
+
+float* ArrMult(float* A, float* B, size_t n){
+
+    float* C = new float[n]; // resultant arr has n total information
+
+    for (unsigned int i = 0; i < n; i++) {
+        C[i] = A[i] * B[i];
+    }
+
+    return C;
+}
+
+Matrix MatInit(float z, mat_size n, mat_size m /* = -1 */){
+
+    if (m == -1) {
+        float C[n];
+        std::fill_n(C,n,z);
+        return C;
+    }
+
+    else {
+        float C[n*m];
+        std::fill_n(C,n,z);
+        return C;
+    }
 
 }

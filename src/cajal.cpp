@@ -1,3 +1,3 @@
-#include "cajal.h"
+#include "cajal.hpp"
 #include <functional>
 #include <vector>

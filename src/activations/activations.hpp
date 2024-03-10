@@ -1,5 +1,5 @@
-#ifndef ACTIVATIONS_H_a
-#define ACTIVATIONS_H_a
+#ifndef ACTIVATIONS_H
+#define ACTIVATIONS_H
 
 #include <iostream>
 
@@ -8,14 +8,14 @@ using Matrix = float*;
 
 //TODO: int activate(string fn, Matrix m, unsigned int ti, float alpha = 0.0); /* This is a funtion that finds and calls your function that's name is your string */ 
 
-void relu(Matrix m, unsigned int ti);
+void Relu(Matrix m, unsigned int ti);
 
-void lrelu(Matrix m, unsigned int ti, float alpha = 0.3);
+void Lrelu(Matrix m, unsigned int ti, float alpha = 0.3);
 
-void softmax(Matrix m, unsigned int ti);
+void Softmax(Matrix m, unsigned int ti);
 
-void tanh(Matrix m, unsigned int ti);
+void Tanh(Matrix m, unsigned int ti);
 
-void sigmoid(Matrix m, unsigned int ti);
+void Sigmoid(Matrix m, unsigned int ti);
 
 #endif
