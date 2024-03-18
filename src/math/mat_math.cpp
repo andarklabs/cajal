@@ -224,3 +224,14 @@ Matrix MatInit(float z, mat_size n, mat_size m /* = -1 */){
     }
 
 }
+
+float Dot(float* v, float* w, size_t n){
+
+    float product;
+    
+    for (unsigned int i = 0; i < n; i++){
+        product += v[i] * w[i]; 
+    }
+
+    return product;
+}

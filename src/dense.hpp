@@ -13,7 +13,7 @@ class Dense{
 
 public:
     // Constructor creates inital weights and biases for one layer
-    Dense(unsigned int num_inputs, unsigned int num_outputs, const std::string activation); 
+    Dense(unsigned int numInputs, unsigned int numOutputs, std::string activationPassed); 
     
     ~Dense(); // Destuctor
 
@@ -28,6 +28,7 @@ private:
     unsigned int num_inputs;
     unsigned int num_outputs;
     unsigned int num_weights;
+    std::string activation;
 
 };
 #endif

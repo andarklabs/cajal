@@ -1,6 +1,7 @@
-// header of andark implementation of basic mat mult library
+// header of andark implementation of basic mat mult section of cajal library
 
 //TODO: follow naming conventions - https://www.geeksforgeeks.org/naming-convention-in-c/
+//TODO: change from floats to doubles
 
 #ifndef MAT_MATH_H
 #define MAT_MATH_H
@@ -32,6 +33,9 @@ Matrix SquareStrassen(Matrix A, Matrix B, mat_size n, bool del = false);
 
 // basic array multiplication. Varible names changed to reflect conceptual difference
 float* ArrMult(float* A, float* B, size_t n);
+
+// basic dot product
+float Dot(float* v, float* w, size_t n);
 
 // prints out contents of matrix. rows = r; columns = c.
 void ToStr(Matrix A, unsigned int r, unsigned int c);

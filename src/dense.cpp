@@ -4,11 +4,12 @@
 
 using namespace std;
 
-Dense::Dense(unsigned int num_inputs, unsigned int num_outputs, const std::string activation){
+Dense::Dense(unsigned int numInputs, unsigned int numOutputs, std::string activationPassed){
 
-    num_inputs = num_inputs;
-    num_outputs = num_outputs;
-    num_weights = num_inputs * num_outputs;
+    num_inputs = numInputs;
+    num_outputs = numOutputs;
+    num_weights = numInputs * numOutputs;
+    activation = activationPassed;
 
     if (activation == "relu" || activation == "lrelu") {                // He init
         weights = InitWeights(num_inputs, num_outputs, "he");
