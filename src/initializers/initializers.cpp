@@ -3,8 +3,7 @@
 
 using namespace std;
 
-// all functions allocate a new array `C`. Remember to delete it.
-
+// this function allocates a new array `C`. Remember to delete it.
 float* InitWeights(unsigned int inp, unsigned int outp, const std::string technique /* = "xavier" */, const std::string distribution /* = "uniform" */){
     
     std::function<float()> rand_func;
@@ -72,4 +71,8 @@ std::function<float()> He(unsigned int inp, const std::string distribution /* = 
     
     return rand_func;
 
+}
+
+int main(){
+    return -1;
 }

@@ -1,6 +1,6 @@
 #include "dense.hpp"
-#include "initializers.hpp"
-#include "mat_math.hpp"
+#include "initializers/initializers.hpp"
+#include "math/mat_math.hpp"
 
 using namespace std;
 
@@ -42,10 +42,12 @@ float* Dense::ForwardProp(float* inputs){
 }
 
 int main() {
-  unsigned int s[] = {2,6,2,3}; // 2d 6ti 2r 3c
-  float test[] = {4,5,-7,8,10,12}; // [[4,5,7],[8,10,12]]
-  Matrix M = MatInit(0,6);
-  ToStr(M, s[2], s[3]);
-  ToStr(test, s[2], s[3]); // defined in mat_math.cpp
-  return 0;
+    int n = 10;
+    Dense layer1 = Dense(n,n, "relu");
+    float inp[10] = {1,2,3,4,5,6,7,8,9,0};
+    float* arr = layer1.ForwardProp(inp);
+
+    ToStr(arr, 1, 10);
+
+    return 0;
 }
