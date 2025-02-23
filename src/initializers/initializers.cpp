@@ -35,11 +35,11 @@ std::function<float()> Xavier(unsigned int inp, unsigned int outp, const std::st
     
     if (distribution == "uniform") {
         r = sqrt(6/(inp + outp));
-        std::uniform_int_distribution<float> distrib(-r, r);
+        std::uniform_int_distribution<> distrib(-r, r);
         rand_func = [&]() { return distrib(gen); };
     } else if (distribution == "normal") {
         r = sqrt(2/(inp + outp));
-        std::normal_distribution<float> distrib(0,r);
+        std::normal_distribution<> distrib(0,r);
         rand_func = [&]() { return distrib(gen); };
     } else {
         cout << "Error: invalid distribution" << std::endl;
@@ -59,11 +59,11 @@ std::function<float()> He(unsigned int inp, const std::string distribution /* = 
     
     if (distribution == "uniform") {
         r = sqrt(6/(inp));
-        std::uniform_int_distribution<float> distrib(-r, r);
+        std::uniform_int_distribution<> distrib(-r, r);
         rand_func = [&]() { return distrib(gen); };
     } else if (distribution == "normal") {
         r = sqrt(2/(inp));
-        std::normal_distribution<float> distrib(0,r);
+        std::normal_distribution<> distrib(0,r);
         rand_func = [&]() { return distrib(gen); };
     } else {
         cout << "Error: invalid distribution" << std::endl;
@@ -74,5 +74,6 @@ std::function<float()> He(unsigned int inp, const std::string distribution /* = 
 }
 
 int main(){
-    return -1;
+    InitWeights(6,6);
+    return 1; 
 }

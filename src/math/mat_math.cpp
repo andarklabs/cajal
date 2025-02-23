@@ -236,7 +236,7 @@ float Dot(float* v, float* w, size_t n){
     return product;
 }
 
-int main() {
+int smain() {
     
     return -1;
 }
