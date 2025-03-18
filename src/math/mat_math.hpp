@@ -9,6 +9,7 @@
 #include <math.h>
 #include <iostream>
 #include <cassert>
+#include <chrono>
 
 // aliases
 using Matrix = float*;
