@@ -2,10 +2,13 @@
 # like handwriting analysis using our library
 
 import numpy as np # eventually this will be made obsolete by our own math libraries
+import time
 
 class NeuralNetwork:
 
     """
+    this is just a 3 layer nn. Each layer has a certain dimension. 
+
     :param int input_dim: Number of input neurons.
     :param int hidden_dim: Number of neurons in the hidden layer.
     :param int output_dim: Number of output neurons.
@@ -23,6 +26,73 @@ class NeuralNetwork:
         self.b1 = np.zeros((1, hidden_dim))
         self.W2 = np.random.randn(hidden_dim, output_dim) * np.sqrt(1. / hidden_dim)
         self.b2 = np.zeros((1, output_dim))
+
+    def tanh(self, z):
+        """
+        Compute the tanh activation function.
+
+        :param np.ndarray z: The input array.
+        :return: The result of applying tanh on z.
+        :rtype: np.ndarray
+        """
+        pass
+
+    def tanh_derivitive(self, a):
+        """
+        Compute the derivative of the tanh function.
+
+        :param np.ndarray a: The output of the tanh function.
+        :return: The derivative of the tanh function.
+        :rtype: np.ndarray
+        """
+        pass
+
+    def relu(self, z, leaky = 0):
+        """
+        Compute the relu activation function.
+
+        :param np.ndarray z: The input array.
+        :param float leaky: The value of alpha in our relu function.
+        :return: The result of applying relu on z.
+        :rtype: np.ndarray
+        """
+        if z > 0:
+            return z
+        else:
+            return leaky * z
+    
+    def relu_derivitive(self, a, leaky = 0):
+        """
+        Compute the derivative of the relu function.
+
+        :param np.ndarray a: The output of the relu function.
+        :return: The derivative of the relu function.
+        :rtype: np.ndarray
+        """
+        if a > 0:
+            return 1
+        else:
+            return leaky
+
+    def softmax(self, z):
+        """
+        Compute the softmax activation function.
+
+        :param np.ndarray z: The input array.
+        :return: The result of applying softmax on z.
+        :rtype: np.ndarray
+        """
+        pass
+
+    def softmax_derivitive(self, a):
+        """
+        Compute the derivative of the softmax function.
+
+        :param np.ndarray a: The output of the softmax function.
+        :return: The derivative of the softmax function.
+        :rtype: np.ndarray
+        """
+        pass
 
     def sigmoid(self, z):
         """
@@ -93,34 +163,61 @@ class NeuralNetwork:
         :param np.ndarray y: True labels of shape (n_samples, output_dim).
         :param int epochs: Number of training iterations.
         """
-        for epoch in range(epochs):
+        tick = 0
+        for epoch in range(1,epochs+1):
             # Forward propagation step
             output = self.forward(X)
             # Backward propagation step
             self.backward(X, y, output)
             # Print loss every 1000 epochs
             if epoch % 1000 == 0:
+
                 loss = np.mean((y - output) ** 2)
-                print(f'Epoch {epoch}, Loss: {loss:.3f}')
+                # print(f'Epoch {epoch}, Loss: {loss:.3f}')
+                if tick == 0:
+                    tick = 1
+                    loss_old = loss
+                elif loss > loss_old - .001: # we have converged
+                    break
+                else:
+                    loss_old = loss
+
 
 if __name__ == "__main__":
-    np.random.seed(1) # this actually only works well under certain initial weights. We need to be able to create a general working model. 
+    tries = 100
+    failed = 0
+    start_time = time.perf_counter()
 
     # Example usage: Solving the XOR problem
     X = np.array([[0, 0],
-                  [0, 1],
-                  [1, 0],
-                  [1, 1]])
+                [0, 1],
+                [1, 0],
+                [1, 1]])
     y = np.array([[0],
-                  [1],
-                  [1],
-                  [0]])
+                [1],
+                [1],
+                [0]])
 
-    # Create a NeuralNetwork instance with 2 input neurons, 2 hidden neurons, and 1 output neuron
-    nn = NeuralNetwork(input_dim=2, hidden_dim=2, output_dim=1, learning_rate=0.1)
-    nn.train(X, y, epochs=10000)
+    for i in range(tries):
 
-    # Test the trained network
-    for sample in X:
-        output = nn.forward(np.array([sample]))
-        print(f'Input: {sample}, Output: {output[0][0]:.3f}')
+        np.random.seed(i) # this actually only works well under certain initial weights. We need to be able to create a general working model. 
+
+        # Create a NeuralNetwork instance with 2 input values, 2 hidden neurons, and 1 output value
+        nn = NeuralNetwork(input_dim=2, hidden_dim=20, output_dim=1, learning_rate=0.1)
+
+        # train our network
+        nn.train(X, y, epochs=10000)
+
+        # Test the trained network
+        loss = 0
+        for sample in X:
+            output = nn.forward(np.array([sample]))[0][0]
+            loss += pow(((sample[0]+sample[1])%2) - output,2) # MSE of our problem
+            # print(f'Input: {sample}, Output: {output:.3f}')
+
+        if loss > .10: # we fail to converge properly
+            failed += 1
+            print("We failed. loss = ", loss, "output", [nn.forward(np.array([sample]))[0][0] for sample in X]) # we can look at the outputs where we failed
+
+    end_time = time.perf_counter()
+    print("accuracy:", (tries-failed)/tries, "\naverage time (seconds): ", (end_time - start_time)/tries) # time includes train/test time for each weight initialization

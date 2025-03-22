@@ -2,6 +2,7 @@
 #define ACTIVATIONS_H
 
 #include <iostream>
+#include <chrono>
 
 
 using Matrix = float*;
