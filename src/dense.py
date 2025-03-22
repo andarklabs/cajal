@@ -35,7 +35,7 @@ class NeuralNetwork:
         :return: The result of applying tanh on z.
         :rtype: np.ndarray
         """
-        pass
+        return 2./(1+np.exp(-2*z)) - 1
 
     def tanh_derivitive(self, a):
         """
@@ -45,7 +45,7 @@ class NeuralNetwork:
         :return: The derivative of the tanh function.
         :rtype: np.ndarray
         """
-        pass
+        return 1 - pow(self.tanh(a),2)
 
     def relu(self, z, leaky = 0):
         """
@@ -145,7 +145,7 @@ class NeuralNetwork:
 
         # Calculate the error in the hidden layer
         error_hidden = np.dot(delta_output, self.W2.T)
-        delta_hidden = error_hidden * self.sigmoid_derivative(self.a1)
+        delta_hidden = error_hidden * self.sigmoid_derivative(self.a1) # any good caching tricks I can use here... Seems my foundations need waxing...
 
         # Update weights and biases for hidden-output layer
         self.W2 += np.dot(self.a1.T, delta_output) * self.learning_rate
