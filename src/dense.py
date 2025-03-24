@@ -45,7 +45,7 @@ class NeuralNetwork:
         :return: The derivative of the tanh function.
         :rtype: np.ndarray
         """
-        return 1 - pow(self.tanh(a),2)
+        return 1 - pow(a,2)
 
     def relu(self, z, leaky = 0):
         """
