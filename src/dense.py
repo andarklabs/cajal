@@ -82,7 +82,8 @@ class NeuralNetwork:
         :return: The result of applying softmax on z.
         :rtype: np.ndarray
         """
-        pass
+        exps = np.exp(z)
+        return exps/np.sum(exps)
 
     def softmax_derivitive(self, a):
         """
@@ -92,7 +93,7 @@ class NeuralNetwork:
         :return: The derivative of the softmax function.
         :rtype: np.ndarray
         """
-        pass
+        return a * (a-1)      
 
     def sigmoid(self, z):
         """
@@ -137,7 +138,7 @@ class NeuralNetwork:
 
         :param np.ndarray X: Input data of shape (n_samples, input_dim).
         :param np.ndarray y: True labels of shape (n_samples, output_dim).
-        :param np.ndarray output: Output from the forward propagation.
+        :param np.ndarray output: Output from the forward propagation of shape (output_dim).
         """
         # Calculate the error in the output layer
         error_output = y - output
@@ -200,7 +201,7 @@ if __name__ == "__main__":
 
     for i in range(tries):
 
-        np.random.seed(i) # this actually only works well under certain initial weights. We need to be able to create a general working model. 
+        np.random.seed(200+i) # this actually only works well under certain initial weights. We need to be able to create a general working model. 
 
         # Create a NeuralNetwork instance with 2 input values, 2 hidden neurons, and 1 output value
         nn = NeuralNetwork(input_dim=2, hidden_dim=20, output_dim=1, learning_rate=0.1)
