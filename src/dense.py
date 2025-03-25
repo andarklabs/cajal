@@ -29,7 +29,7 @@ class NeuralNetwork:
 
     def tanh(self, z):
         """
-        Compute the tanh activation function.
+        Computes the tanh activation function.
 
         :param np.ndarray z: The input array.
         :return: The result of applying tanh on z.
@@ -39,7 +39,7 @@ class NeuralNetwork:
 
     def tanh_derivitive(self, a):
         """
-        Compute the derivative of the tanh function.
+        Computes the derivative of the tanh function.
 
         :param np.ndarray a: The output of the tanh function.
         :return: The derivative of the tanh function.
@@ -49,7 +49,7 @@ class NeuralNetwork:
 
     def relu(self, z, leaky = 0):
         """
-        Compute the relu activation function.
+        Computes the relu activation function.
 
         :param np.ndarray z: The input array.
         :param float leaky: The value of alpha in our relu function.
@@ -63,7 +63,7 @@ class NeuralNetwork:
     
     def relu_derivitive(self, a, leaky = 0):
         """
-        Compute the derivative of the relu function.
+        Computes the derivative of the relu function.
 
         :param np.ndarray a: The output of the relu function.
         :return: The derivative of the relu function.
@@ -76,28 +76,30 @@ class NeuralNetwork:
 
     def softmax(self, z):
         """
-        Compute the softmax activation function.
-
+        Computes the softmax activation function.
+        Numerically stabalized.
+        
         :param np.ndarray z: The input array.
         :return: The result of applying softmax on z.
         :rtype: np.ndarray
         """
-        exps = np.exp(z)
+        shiftz = z - np.max(z)
+        exps = np.exp(shiftz)
         return exps/np.sum(exps)
 
     def softmax_derivitive(self, a):
         """
-        Compute the derivative of the softmax function.
+        Computes the derivative of the softmax function.
 
         :param np.ndarray a: The output of the softmax function.
         :return: The derivative of the softmax function.
         :rtype: np.ndarray
         """
-        return a * (a-1)      
+        return -np.outer(a,a) + np.diag(a.flatten())    
 
     def sigmoid(self, z):
         """
-        Compute the sigmoid activation function.
+        Computes the sigmoid activation function.
 
         :param np.ndarray z: The input array.
         :return: The result of applying sigmoid on z.
@@ -107,7 +109,7 @@ class NeuralNetwork:
 
     def sigmoid_derivative(self, a):
         """
-        Compute the derivative of the sigmoid function.
+        Computes the derivative of the sigmoid function.
 
         :param np.ndarray a: The output of the sigmoid function.
         :return: The derivative of the sigmoid function.
@@ -117,7 +119,7 @@ class NeuralNetwork:
 
     def forward(self, X):
         """
-        Perform forward propagation.
+        Performs forward propagation.
 
         :param np.ndarray X: Input data of shape (n_samples, input_dim).
         :return: The output of the network.
@@ -134,7 +136,7 @@ class NeuralNetwork:
 
     def backward(self, X, y, output):
         """
-        Perform backward propagation and update the network's weights and biases.
+        Performs backward propagation and update the network's weights and biases.
 
         :param np.ndarray X: Input data of shape (n_samples, input_dim).
         :param np.ndarray y: True labels of shape (n_samples, output_dim).
@@ -166,10 +168,10 @@ class NeuralNetwork:
         """
         tick = 0
         for epoch in range(1,epochs+1):
-            # Forward propagation step
+
             output = self.forward(X)
-            # Backward propagation step
             self.backward(X, y, output)
+            
             # Print loss every 1000 epochs
             if epoch % 1000 == 0:
 
@@ -189,7 +191,7 @@ if __name__ == "__main__":
     failed = 0
     start_time = time.perf_counter()
 
-    # Example usage: Solving the XOR problem
+    # the XOR problem
     X = np.array([[0, 0],
                 [0, 1],
                 [1, 0],
@@ -203,13 +205,13 @@ if __name__ == "__main__":
 
         np.random.seed(200+i) # this actually only works well under certain initial weights. We need to be able to create a general working model. 
 
-        # Create a NeuralNetwork instance with 2 input values, 2 hidden neurons, and 1 output value
+        # make a NeuralNetwork instance with 2 input values, 2 hidden neurons, and 1 output value
         nn = NeuralNetwork(input_dim=2, hidden_dim=20, output_dim=1, learning_rate=0.1)
 
         # train our network
         nn.train(X, y, epochs=10000)
 
-        # Test the trained network
+        # test our trained network
         loss = 0
         for sample in X:
             output = nn.forward(np.array([sample]))[0][0]
