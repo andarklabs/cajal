@@ -17,7 +17,7 @@ public:
     
     ~Dense(); // Destuctor
 
-    float* ForwardProp(float* inputs); // returns a float array representing the layer
+    float* ForwardProp(float* inputs, int batch_size); // returns a float array representing the layer
     
     void BackwardProp(float loss);
 

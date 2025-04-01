@@ -129,6 +129,15 @@ class NeuralNetwork:
         self.z1 = np.dot(X, self.W1) + self.b1
         self.a1 = self.sigmoid(self.z1)
 
+        """nsamples = X.shape[0]
+
+        for batch in range(nsamples):
+            for out_neuron in range(self.hidden_dim):
+                sm = 0
+                for in_neuron in range(self.input_dim):
+                    sm += X[batch, in_neuron] * self.W1[out_neuron, in_neuron]
+                self.a1[batch,out_neuron] = self.sigmoid(sm + self.b1[out_neuron])
+        """
         # Compute the output layer input and activation
         self.z2 = np.dot(self.a1, self.W2) + self.b2
         self.a2 = self.sigmoid(self.z2)

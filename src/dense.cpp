@@ -21,7 +21,7 @@ Dense::Dense(unsigned int numInputs, unsigned int numOutputs, std::string activa
 
 }
 
-float* Dense::ForwardProp(float* inputs){
+float* Dense::ForwardProp(float* inputs, int batch_size){
 
     unsigned int indx = 0;
 
@@ -43,9 +43,10 @@ float* Dense::ForwardProp(float* inputs){
 
 int main() {
     int n = 10;
+    int b = 10;
     Dense layer1 = Dense(n,n, "relu");
     float inp[10] = {1,2,3,4,5,6,7,8,9,0};
-    float* arr = layer1.ForwardProp(inp);
+    float* arr = layer1.ForwardProp(inp,b);
 
     ToStr(arr, 1, 10);
 
