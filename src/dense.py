@@ -3,6 +3,7 @@
 
 import numpy as np # eventually this will be made obsolete by our own math libraries
 import time
+from initializers.initalizers import init_weights
 
 class NeuralNetwork:
 
