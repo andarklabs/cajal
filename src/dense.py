@@ -22,10 +22,10 @@ class NeuralNetwork:
         self.output_dim = output_dim
         self.learning_rate = learning_rate
 
-        # We will adjust the following with our own weight initializations later 
-        self.W1 = np.random.randn(input_dim, hidden_dim) * np.sqrt(1. / input_dim)
+        # DONE: We will adjust the following with our own weight initializations later 
+        self.W1 = init_weights(input_dim, hidden_dim)
         self.b1 = np.zeros((1, hidden_dim))
-        self.W2 = np.random.randn(hidden_dim, output_dim) * np.sqrt(1. / hidden_dim)
+        self.W2 = init_weights(hidden_dim, output_dim)
         self.b2 = np.zeros((1, output_dim))
 
     def tanh(self, z):

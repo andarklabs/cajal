@@ -28,7 +28,7 @@ def init_weights(inp: int, outp: int, technique: str = "xavier", distribution: s
         for j in range(outp):
             weights[i, j] = rand_func()
     
-    return weights
+    return weights 
 
 def xavier(inp: int, outp: int, distribution: str = "uniform") -> Callable[[], float]:
     """
