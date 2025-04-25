@@ -16,17 +16,17 @@ class NeuralNetwork:
     :param float learning_rate: Learning rate for training.
     """
 
-    def __init__(self, input_dim, hidden_dim, output_dim, learning_rate=0.01):
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.output_dim = output_dim
+    def __init__(self, layers, learning_rate=0.01):
+        self.layers = layers # the dimension of each layer for each layer in network (assumes all values are ints >0)
         self.learning_rate = learning_rate
+        self.depth = len(layers)
+        self.weights = []
+        self.biases = []
 
         # DONE: We will adjust the following with our own weight initializations later 
-        self.W1 = init_weights(input_dim, hidden_dim)
-        self.b1 = np.zeros((1, hidden_dim))
-        self.W2 = init_weights(hidden_dim, output_dim)
-        self.b2 = np.zeros((1, output_dim))
+        for i in range(1, self.depth):
+            self.weights.append(init_weights(layers[i-1], layers[i]))
+            self.biases.append(np.zeros((1, layers[i])))
 
     def tanh(self, z):
         """
@@ -126,23 +126,12 @@ class NeuralNetwork:
         :return: The output of the network.
         :rtype: np.ndarray
         """
-        # Compute the input for the hidden layer
-        self.z1 = np.dot(X, self.W1) + self.b1
-        self.a1 = self.sigmoid(self.z1)
+        # store the outputs of each layer in an array to use in backprop 
+        self.outputs = [X]
+        for i in range(self.depth - 1):
+            self.outputs.append(self.sigmoid(np.dot(self.outputs[-1], self.weights[i]) + self.biases[i]))
 
-        """nsamples = X.shape[0]
-
-        for batch in range(nsamples):
-            for out_neuron in range(self.hidden_dim):
-                sm = 0
-                for in_neuron in range(self.input_dim):
-                    sm += X[batch, in_neuron] * self.W1[out_neuron, in_neuron]
-                self.a1[batch,out_neuron] = self.sigmoid(sm + self.b1[out_neuron])
-        """
-        # Compute the output layer input and activation
-        self.z2 = np.dot(self.a1, self.W2) + self.b2
-        self.a2 = self.sigmoid(self.z2)
-        return self.a2
+        return self.outputs[-1]
 
     def backward(self, X, y, output):
         """
@@ -152,21 +141,18 @@ class NeuralNetwork:
         :param np.ndarray y: True labels of shape (n_samples, output_dim).
         :param np.ndarray output: Output from the forward propagation of shape (output_dim).
         """
-        # Calculate the error in the output layer
-        error_output = y - output
-        delta_output = error_output * self.sigmoid_derivative(output)
+        # Calculate the error in the each layer and put it (in constant time) at the end of each array (so the error is in reverse of the layers)
+        error_layers = [y - output]
+        delta_layers = [error_layers[-1] * self.sigmoid_derivative(output)]
+        for i in range(self.depth - 2, 0, -1):
+            # Calculate the error in each layer
+            error_layers.append(np.dot(delta_layers[-1], self.weights[i].T))
+            delta_layers.append(error_layers[-1] * self.sigmoid_derivative(self.outputs[i]))
 
-        # Calculate the error in the hidden layer
-        error_hidden = np.dot(delta_output, self.W2.T)
-        delta_hidden = error_hidden * self.sigmoid_derivative(self.a1) # any good caching tricks I can use here... Seems my foundations need waxing...
-
-        # Update weights and biases for hidden-output layer
-        self.W2 += np.dot(self.a1.T, delta_output) * self.learning_rate
-        self.b2 += np.sum(delta_output, axis=0, keepdims=True) * self.learning_rate
-
-        # Update weights and biases for input-hidden layer
-        self.W1 += np.dot(X.T, delta_hidden) * self.learning_rate
-        self.b1 += np.sum(delta_hidden, axis=0, keepdims=True) * self.learning_rate
+        for i in range(self.depth - 1):
+            # Update weights and biases for each ff layer
+            self.weights[-(i+1)] += np.dot(self.outputs[-(i+2)].T, delta_layers[i]) * self.learning_rate
+            self.biases[-(i+1)] += np.sum(delta_layers[i], axis=0, keepdims=True) * self.learning_rate
 
     def train(self, X, y, epochs=10000):
         """
@@ -216,7 +202,7 @@ if __name__ == "__main__":
         np.random.seed(200+i) # this actually only works well under certain initial weights. We need to be able to create a general working model. 
 
         # make a NeuralNetwork instance with 2 input values, 2 hidden neurons, and 1 output value
-        nn = NeuralNetwork(input_dim=2, hidden_dim=20, output_dim=1, learning_rate=0.1)
+        nn = NeuralNetwork([2, 20, 1], learning_rate=0.1)
 
         # train our network
         nn.train(X, y, epochs=10000)

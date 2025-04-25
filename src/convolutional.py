@@ -26,6 +26,7 @@ class ConvolutionalNeuralNetwork(nn.Module):
         self.fc3 = nn.Linear(84, 10)
         self.epochs = 5
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     def forward(self, x):
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
@@ -35,7 +36,7 @@ class ConvolutionalNeuralNetwork(nn.Module):
         x = self.fc3(x)
         return x    
 
-    def train(self, train_loader, optimizer, criterion):
+    def train(self, train_loader, optimizer = optim.Adam, criterion = ""):
         for epoch in range(self.epochs):
             for i, (images, labels) in enumerate(train_loader, 0):
                 optimizer.zero_grad()
@@ -46,8 +47,6 @@ class ConvolutionalNeuralNetwork(nn.Module):
 
 
     def test(self, test_loader):
-        correct = 0
-        total = 0
         with torch.no_grad():
             for data in test_loader:
                 images, labels = data
@@ -58,13 +57,13 @@ def load_data():
          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
     )
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=4, shuffle=True, num_workers=2)    
+    return torch.utils.data.DataLoader(trainset, batch_size=4, shuffle=True, num_workers=2)    
 
 
 if __name__ == "__main__":
-    load_data()
     model = ConvolutionalNeuralNetwork()
-    model.train(trainloader, optimizer, criterion)
-    model.test(testloader)
+    trainloader = load_data()
+    model.train(train_loader=trainloader)
+
 
 
