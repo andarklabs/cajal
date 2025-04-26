@@ -202,7 +202,7 @@ if __name__ == "__main__":
         np.random.seed(200+i) # this actually only works well under certain initial weights. We need to be able to create a general working model. 
 
         # make a NeuralNetwork instance with 2 input values, 2 hidden neurons, and 1 output value
-        nn = NeuralNetwork([2, 20, 1], learning_rate=0.1)
+        nn = NeuralNetwork([2, 4, 1], learning_rate=0.1)
 
         # train our network
         nn.train(X, y, epochs=10000)

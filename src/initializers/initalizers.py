@@ -32,7 +32,7 @@ def init_weights(inp: int, outp: int, technique: str = "xavier", distribution: s
 
 def xavier(inp: int, outp: int, distribution: str = "uniform") -> Callable[[], float]:
     """
-    Xavier/Glorot initialization function generator. For sigmoid and tanh activation functions.
+    Xavier/Glorot initialization function generator. For sigmoid and tanh activation functions (0 mean activations). 
     
     Args:
         inp: Number of input neurons
@@ -59,7 +59,7 @@ def xavier(inp: int, outp: int, distribution: str = "uniform") -> Callable[[], f
 
 def he(inp: int, distribution: str = "uniform") -> Callable[[], float]:
     """
-    He initialization function generator. For ReLU activation functions.
+    He initialization function generator. For ReLU activation functions (non-zero mean activations). 
     
     Args:
         inp: Number of input neurons
