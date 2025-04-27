@@ -16,12 +16,26 @@ class NeuralNetwork:
     :param float learning_rate: Learning rate for training.
     """
 
-    def __init__(self, layers, learning_rate=0.01):
+    def __init__(self, layers, activation_function = "sigmoid", learning_rate=0.01):
         self.layers = layers # the dimension of each layer for each layer in network (assumes all values are ints >0)
         self.learning_rate = learning_rate
         self.depth = len(layers)
         self.weights = []
         self.biases = []
+        if activation_function == "tanh":
+            self.activation_function = self.tanh
+            self.activation_function_derivative = self.tanh_derivitive  
+        elif activation_function == "relu":
+            self.activation_function = self.relu
+            self.activation_function_derivative = self.relu_derivitive
+        elif activation_function == "softmax":
+            self.activation_function = self.softmax
+            self.activation_function_derivative = self.softmax_derivitive
+        elif activation_function == "sigmoid":
+            self.activation_function = self.sigmoid
+            self.activation_function_derivative = self.sigmoid_derivative
+        else:
+            raise ValueError("Invalid activation function")
 
         # DONE: We will adjust the following with our own weight initializations later 
         for i in range(1, self.depth):
@@ -48,7 +62,7 @@ class NeuralNetwork:
         """
         return 1 - pow(a,2)
 
-    def relu(self, z, leaky = 0):
+    def relu(self, z, leaky = 0.01):
         """
         Computes the relu activation function.
 
@@ -57,12 +71,16 @@ class NeuralNetwork:
         :return: The result of applying relu on z.
         :rtype: np.ndarray
         """
-        if z > 0:
-            return z
-        else:
-            return leaky * z
+        result = np.zeros(z.shape)
+        for i in range(z.shape[0]):
+            for j in range(z.shape[1]):
+                if z[i,j] > 0:
+                    result[i,j] = z[i,j]
+                else:
+                    result[i,j] = leaky * z[i,j]
+        return result
     
-    def relu_derivitive(self, a, leaky = 0):
+    def relu_derivitive(self, a, leaky = 0.01):
         """
         Computes the derivative of the relu function.
 
@@ -70,11 +88,14 @@ class NeuralNetwork:
         :return: The derivative of the relu function.
         :rtype: np.ndarray
         """
-        if a > 0:
-            return 1
-        else:
-            return leaky
-
+        result = np.zeros(a.shape)
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                if a[i,j] > 0:
+                    result[i,j] = 1
+                else:
+                    result[i,j] = leaky
+        return result
     def softmax(self, z):
         """
         Computes the softmax activation function.
@@ -129,7 +150,7 @@ class NeuralNetwork:
         # store the outputs of each layer in an array to use in backprop 
         self.outputs = [X]
         for i in range(self.depth - 1):
-            self.outputs.append(self.sigmoid(np.dot(self.outputs[-1], self.weights[i]) + self.biases[i]))
+            self.outputs.append(self.activation_function(np.dot(self.outputs[-1], self.weights[i]) + self.biases[i]))
 
         return self.outputs[-1]
 
@@ -143,11 +164,11 @@ class NeuralNetwork:
         """
         # Calculate the error in the each layer and put it (in constant time) at the end of each array (so the error is in reverse of the layers)
         error_layers = [y - output]
-        delta_layers = [error_layers[-1] * self.sigmoid_derivative(output)]
+        delta_layers = [error_layers[-1] * self.activation_function_derivative(output)]
         for i in range(self.depth - 2, 0, -1):
             # Calculate the error in each layer
             error_layers.append(np.dot(delta_layers[-1], self.weights[i].T))
-            delta_layers.append(error_layers[-1] * self.sigmoid_derivative(self.outputs[i]))
+            delta_layers.append(error_layers[-1] * self.activation_function_derivative(self.outputs[i]))
 
         for i in range(self.depth - 1):
             # Update weights and biases for each ff layer
@@ -202,7 +223,7 @@ if __name__ == "__main__":
         np.random.seed(200+i) # this actually only works well under certain initial weights. We need to be able to create a general working model. 
 
         # make a NeuralNetwork instance with 2 input values, 2 hidden neurons, and 1 output value
-        nn = NeuralNetwork([2, 4, 1], learning_rate=0.1)
+        nn = NeuralNetwork([2, 4, 1], activation_function = "relu", learning_rate=0.1)
 
         # train our network
         nn.train(X, y, epochs=10000)
