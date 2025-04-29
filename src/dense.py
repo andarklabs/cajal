@@ -16,10 +16,11 @@ class NeuralNetwork:
     :param float learning_rate: Learning rate for training.
     """
 
-    def __init__(self, layers, activation_function = "sigmoid", learning_rate=0.01):
+    def __init__(self, layers, side_layers= 0, activation_function = "sigmoid", learning_rate=0.01):
         self.layers = layers # the dimension of each layer for each layer in network (assumes all values are ints >0)
         self.learning_rate = learning_rate
         self.depth = len(layers)
+        self.side_layers = side_layers
         self.weights = []
         self.biases = []
         if activation_function == "tanh":
@@ -152,7 +153,17 @@ class NeuralNetwork:
         for i in range(self.depth - 1):
             self.outputs.append(self.activation_function(np.dot(self.outputs[-1], self.weights[i]) + self.biases[i]))
 
-        return self.outputs[-1]
+        # side pass
+        self.side_outputs = []
+        all_outputs = []
+        for output in self.output: 
+            for elm in output: 
+                all_outputs.append(elm)
+
+        for layer in self.side_layers:
+            self.side_outputs.append(self.activation_function(np.dot(all_outputs, self.weights[i]) + self.biases[i]))
+            
+        return self.outputs[-1] if self.side_outputs == [] else self.side_outputs[-1]
 
     def backward(self, X, y, output):
         """
