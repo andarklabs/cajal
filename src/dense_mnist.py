@@ -52,12 +52,12 @@ class NeuralNetwork:
             self.activation_function_derivative = self.sigmoid_derivative
         else:
             raise ValueError("Invalid activation function")
-
+        print("layers", self.layers, "side layers", self.side_layers)
         # --- Initialize weights and biases --- 
         # feedforward weights and biases
         for i in range(1, self.depth):
-            self.weights.append(init_weights(layers[i-1], layers[i], self.init_technique))
-            self.biases.append(np.zeros((1, layers[i])))
+            self.weights.append(init_weights(self.layers[i-1], self.layers[i], self.init_technique))
+            self.biases.append(np.zeros((1, self.layers[i])))
         print("weights", self.weights, "biases", self.biases, "layers", self.layers)
         # sidepass weights and biases
         
@@ -66,7 +66,8 @@ class NeuralNetwork:
             for i in range(1, self.side_depth):
                 self.side_weights.append(init_weights(self.side_layers[i-1], self.side_layers[i], self.init_technique))
                 self.side_biases.append(np.zeros((1, self.side_layers[i])))
-        print("side weights", self.side_weights, "side biases", self.side_biases, "side layers", self.side_layers)
+            print("side weights", self.side_weights, "side biases", self.side_biases, "side layers", self.side_layers)
+
     def tanh(self, z):
         """
         Computes the tanh activation function.
@@ -175,17 +176,16 @@ class NeuralNetwork:
         """
         # store the outputs of each layer in an array to use in backprop 
         self.outputs = [X]
-        for i in range(self.depth - 1):
-            with open(".\output0.txt", "a") as f:
-                f.write(f"Layer {i+1} output shape: {self.outputs[-1]}, weights shape: {self.weights[i]}, biases shape: {self.biases[i]}\n")
+        for i in range(self.depth - 1):  
             self.outputs.append(self.activation_function(np.dot(self.outputs[-1], self.weights[i]) + self.biases[i]))
-        
+            print(f"Layer {i+1} output shape: {self.outputs[-1]}, weights shape: {self.weights[i]}, biases shape: {self.biases[i]}\n")
+
         if side_pass:
             self.all_outputs = []
             for output in self.outputs: 
                 for elm in output: 
                     self.all_outputs.append(elm)
-
+            print("all outputs", self.outputs)
             self.side_outputs = [self.all_outputs]
             for i in range(self.side_depth - 1):
 
@@ -280,10 +280,10 @@ if __name__ == "__main__":
         np.random.seed(200+i) # this actually only works well under certain initial weights. We need to be able to create a general working model. 
 
         # make a NeuralNetwork instance with 2 input values, 2 hidden neurons, and 1 output value
-        nn = NeuralNetwork([2, 4, 4], side_layers=[4,1], activation_function = "tanh", learning_rate=0.1)
+        nn = NeuralNetwork([2, 4, 6], side_layers=[4,1], activation_function = "tanh", learning_rate=0.1)
 
         # train our network
-        nn.train(X, y, epochs=10000)
+        nn.train(X, y, side_pass = True, side_gradients = True, epochs=10000)
 
         # test our trained network
         loss = 0
