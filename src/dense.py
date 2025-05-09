@@ -141,7 +141,9 @@ class NeuralNetwork:
         :return: The derivative of the softmax function.
         :rtype: np.ndarray
         """
-        return -np.outer(a,a) + np.diag(a.flatten())    
+        s = self.softmax(a)
+        jacobian = np.diag(s) - np.outer(s, s)
+        return jacobian   
     
     def sigmoid(self, z):
         """
@@ -200,6 +202,7 @@ class NeuralNetwork:
             side_deltas = [None] * (self.side_depth - 1)
             side_deltas[-1] = (y - output) * self.activation_function_derivative(self.outputs[-1])
             for i in range(self.side_depth - 2, 0, -1):
+               
                 side_deltas.append(np.dot(side_deltas[-1], self.side_weights[i].T) * self.activation_function_derivative(self.side_outputs[i]))
                 
             if not no_side_gradients:
@@ -212,6 +215,7 @@ class NeuralNetwork:
 
         # Propagate the error backwards
         for i in range(self.depth - 2, 0, -1):
+            print("hi", self.activation_function_derivative(self.outputs[i]),'for', self.outputs[i])
             deltas[i-1] = np.dot(deltas[i], self.weights[i].T) * self.activation_function_derivative(self.outputs[i])
 
         # Update weights and biases

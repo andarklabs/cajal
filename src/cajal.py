@@ -16,7 +16,14 @@ class MLP():
         self.W2 = dense.init_weights(hidden_dim, output_dim)
         self.b2 = np.zeros((1, output_dim))
 
-    def f    
+    def forward(self, X):
+        pass
+    
+    def backward(self, X, y):
+        pass
+    
+    def update_weights(self, X, y):
+        pass
     
 if __name__ == "__main__":
     network0 = NN(input_dim=2, hidden_dim=20, output_dim=1, learning_rate=0.1) # we can build a control network here
