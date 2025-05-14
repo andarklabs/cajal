@@ -8,6 +8,7 @@
 import numpy as np # eventually this will be made obsolete by our own math libraries
 import time
 from initializers.initalizers import init_weights
+from mnist import MNIST
 
 class NaiveSideNet:
 
@@ -156,7 +157,7 @@ class NaiveSideNet:
         :rtype: np.ndarray
         """
 
-        return -1./T
+        return a/T * (1 - a)
     
     def sigmoid(self, z):
         """
@@ -250,16 +251,16 @@ class NaiveSideNet:
             self.learning_rate *= (1 - self.learning_rate_decay)
 
             output = self.forward(X)
-            decisions = np.zeros(4)
+            """decisions = np.zeros(4)
             for i in range(len(decisions)):
                 if output[i][1]>output[i][0]:
                     decisions[i] = 1
                 else:
-                    decisions[i] = 0
-
+                    decisions[i] = 0"""
             
             self.backward(y)
 
+            # TODO: change this to a more appropriate loss function i.e. cross entropy
             loss = np.mean((y - output) ** 2)
             avg_loss += loss
             # Print loss every so many epochs
