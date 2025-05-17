@@ -246,15 +246,16 @@ class NaiveSideNet:
         """
         self.forward(X)
         outputs = self.side_outputs[-1] if self.side_pass else self.outputs[-1]
-        choices = []
+        choices = np.zeros((len(outputs), 10))
         in_loop = range(len(outputs[0]))
-        for output in outputs:
+        for i, output in enumerate(outputs):
             max = 0
             for j in in_loop:       
                 if output[j] > max:
                     max = output[j]
                     max_index = j
-            choices.append(max_index)
+            choices[i][max_index] = 1
+        print("choices", choices)
         return choices
     
     def stochastic_choose(self, X):
@@ -310,15 +311,12 @@ if __name__ == "__main__":
 
     # Load the training data
     images, labels = mndata.load_training()
+    labels = np.array([[1 if labels[i] == j else 0 for j in range(10)] for i in range(len(labels))])
+
     test_images, test_labels = mndata.load_testing()
-    new_test_labels = np.empty((len(test_labels), 10))
-    for i in range(len(test_labels)):
-        new_test_labels[i] = [1 if test_labels[i] == j else 0 for j in range(10)]
-    test_labels = new_test_labels
-    new_labels = np.empty((len(labels), 10))
-    for i in range(len(labels)):
-        new_labels[i] = [1 if labels[i] == j else 0 for j in range(10)]
-    labels = new_labels
+    test_labels = np.array([[1 if test_labels[i] == j else 0 for j in range(10)] for i in range(len(test_labels))])
+    print("labels", labels)
+    print("test labels", test_labels)
     start_time = time.perf_counter()
     print("start time", start_time)
     for i in range(tries):
@@ -329,12 +327,11 @@ if __name__ == "__main__":
         nn = NaiveSideNet(784, 10, 264, 2,  activation_function = "relu", learning_rate=0.1)
         print("nn made")
         # train our network
-        nn.train(images, labels, epochs=10)
+        nn.train(images, labels, epochs=1)
         print("full train done")
-        
+
         # test our trained network
         output = nn.deterministic_choose(test_images)
-        print("output", output)
         if output != test_labels:
             failures += 1
             print("We failed. failures = ", failures, "output", output, "should be", test_labels)
