@@ -1,343 +1,325 @@
 from mnist import MNIST
 import random
-
-# this is the naive side pass class
-
-
-# this is our most basic functionalliy for a nn. We wish to show that we can do the basic nn applications
-# like handwriting analysis using our library
-# this is a library to learn the basics of nn's and how they work. 
-
-import numpy as np # eventually this will be made obsolete by our own math libraries
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import TensorDataset, DataLoader
 import time
-from initializers.initalizers import init_weights
+import argparse
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
 
-class NaiveSideNet:
+# Neural network for MNIST handwriting recognition
+# Optimized for GPU usage on M3 Mac with MPS backend
 
+class MNISTNet(nn.Module):
     """
-    this is just a 3 layer nn. Each layer has a certain dimension. 
-
-    :param int input_dim: Number of input neurons.
-    :param int hidden_dim: Number of neurons in the hidden layer.
-    :param int output_dim: Number of output neurons.
-    :param float learning_rate: Learning rate for training.
+    Neural network for MNIST classification using PyTorch nn.Module
+    Optimized for GPU acceleration on M3 Mac using MPS backend
     """
-
-    def __init__(self, dim_in, dim_out, height_hidden, width_hidden, side_layers = [], activation_function = "sigmoid", learning_rate=0.01, learning_rate_decay = 0.):
+    def __init__(self, input_dim=784, hidden_dim=264, output_dim=10, dropout_rate=0.2):
+        super(MNISTNet, self).__init__()
         
-        self.learning_rate = learning_rate
-        self.learning_rate_decay = learning_rate_decay
-
-        # feedforward layers
-        self.height_hidden = height_hidden # the dimension of each layer for each layer in network (assumes all values are ints >0)
-        self.width_hidden = width_hidden # the dimension of each layer for each layer in network (assumes all values are ints >0)
-        self.dim_in = dim_in
-        self.dim_out = dim_out
-        self.depth = width_hidden + 2
-        self.weights = []
-        self.biases = []
-        self.side_pass = False
-        # sidepass layers
-        if len(side_layers) > 0:
-            self.side_pass = True
-            self.side_layers = [self.height_hidden * self.width_hidden] + side_layers
-            self.side_depth = len(side_layers) 
-            self.side_weights = []
-            self.side_biases = []
-
-        self.init_technique = "xavier"
-
-        if activation_function == "tanh":
-            self.activation_function = self.tanh
-            self.activation_function_derivative = self.tanh_derivitive  
-        elif activation_function == "relu":
-            self.activation_function = self.relu
-            self.activation_function_derivative = self.relu_derivitive
-            self.init_technique = "he"
-        elif activation_function == "softmax":
-            self.activation_function = self.softmax
-            self.activation_function_derivative = self.softmax_derivitive
-        elif activation_function == "sigmoid":
-            self.activation_function = self.sigmoid
-            self.activation_function_derivative = self.sigmoid_derivative
-        else:
-            raise ValueError("Invalid activation function")
-
-        # --- Initialize weights and biases --- 
-        # feedforward weights and biases
-        # TODO: Be better!!! make a array of dimensions and init from there. 
-        self.weights.append(init_weights(self.dim_in, self.height_hidden, self.init_technique))
-        self.biases.append(np.zeros((1, self.height_hidden)))
-        for i in range(self.depth - 3):
-            self.weights.append(init_weights(self.height_hidden, self.height_hidden, self.init_technique))
-            self.biases.append(np.zeros((1, self.height_hidden)))
-        self.weights.append(init_weights(self.height_hidden, self.dim_out, self.init_technique))
-        self.biases.append(np.zeros((1, self.dim_out)))
-
-        # sidepass weights and biases
-        if len(side_layers) > 0:
-            for i in range(1, self.side_depth):
-                self.side_weights.append(init_weights(side_layers[i-1], side_layers[i], self.init_technique))
-                self.side_biases.append(np.zeros((1, side_layers[i])))
-
-    def tanh(self, z):
-        """
-        Computes the tanh activation function.
-
-        :param np.ndarray z: The input array.
-        :return: The result of applying tanh on z.
-        :rtype: np.ndarray
-        """
-        return 2./(1+np.exp(-2*z)) - 1
-
-    def tanh_derivitive(self, a):
-        """
-        Computes the derivative of the tanh function.
-
-        :param np.ndarray a: The output of the tanh function.
-        :return: The derivative of the tanh function.
-        :rtype: np.ndarray
-        """
-        return 1 - pow(a,2)
-
-    def relu(self, z, leaky = 0.01):
-        """
-        Computes the relu activation function.
-
-        :param np.ndarray z: The input array.
-        :param float leaky: The value of alpha in our relu function.
-        :return: The result of applying relu on z.
-        :rtype: np.ndarray
-        """
-        result = np.zeros(z.shape)
-        for i in range(z.shape[0]):
-            for j in range(z.shape[1]):
-                if z[i,j] > 0:
-                    result[i,j] = z[i,j]
-                else:
-                    result[i,j] = leaky * z[i,j]
-        return result
-    
-    def relu_derivitive(self, a, leaky = 0.01):
-        """
-        Computes the derivative of the relu function.
-
-        :param np.ndarray a: The output of the relu function.
-        :return: The derivative of the relu function.
-        :rtype: np.ndarray
-        """
-        result = np.zeros(a.shape)
-        for i in range(a.shape[0]):
-            for j in range(a.shape[1]):
-                if a[i,j] > 0:
-                    result[i,j] = 1
-                else:
-                    result[i,j] = leaky
-        return result
-    
-    def softmax(self, z, T = 1.):
-        """
-        Computes the softmax activation function.
-        Numerically stabalized.
+        # Network architecture
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(hidden_dim, output_dim),
+            nn.LogSoftmax(dim=1)
+        )
         
-        :param np.ndarray z: The input array.
-        :return: The result of applying softmax on z.
-        :rtype: np.ndarray
-        """
-        z = z/T
-        shiftx = z - np.max(z, axis=1, keepdims=True)
-        exp_x = np.exp(shiftx)
-        sum_exp_x = np.sum(exp_x, axis=1, keepdims=True)
-        softmax = exp_x / sum_exp_x
-        return softmax
+        # Initialize weights using He initialization
+        self._initialize_weights()
     
-    def softmax_derivative(self, a, T = 1.):
-        """
-        Computes the derivative of the softmax function.
-
-        :param np.ndarray a: The output of the softmax function.
-        :return: The derivative of the softmax function.
-        :rtype: np.ndarray
-        """
-
-        return a/T * (1 - a)
+    def _initialize_weights(self):
+        for m in self.model:
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                nn.init.constant_(m.bias, 0)
     
-    def sigmoid(self, z):
-        """
-        Computes the sigmoid activation function.
+    def forward(self, x):
+        return self.model(x)
 
-        :param np.ndarray z: The input array.
-        :return: The result of applying sigmoid on z.
-        :rtype: np.ndarray
-        """
-        return 1. / (1 + np.exp(-z))
+def train_model(model, train_loader, test_loader, device, epochs=1, learning_rate=0.01):
+    """
+    Train the model using optimized GPU operations
     
-    def sigmoid_derivative(self, a):
-        """
-        Computes the derivative of the sigmoid function.
-
-        :param np.ndarray a: The output of the sigmoid function.
-        :return: The derivative of the sigmoid function.
-        :rtype: np.ndarray
-        """
-        return a * (1 - a)
+    Parameters:
+        model: PyTorch model
+        train_loader: DataLoader for training data
+        test_loader: DataLoader for testing data
+        device: Device to run the model on (CPU or MPS)
+        epochs: Number of training epochs
+        learning_rate: Learning rate for optimizer
     
-    def forward(self, X):
-        """
-        Performs forward propagation.
-
-        :param np.ndarray X: Input data of shape (n_samples, input_dim).
-        :return: The output of the network.
-        :rtype: np.ndarray
-        """
-        # store the outputs of each layer in an array to use in backprop 
-        self.outputs = [X] # L1
-        for i in range(self.depth - 2): # L2,..,Ln-1
-            self.outputs.append(self.activation_function(np.dot(self.outputs[-1], self.weights[i]) + self.biases[i]))
-        self.outputs.append(self.softmax(np.dot(self.outputs[-1], self.weights[-1]) + self.biases[-1])) # Ln
-
-        if self.side_pass:
-            all_outputs = np.array([])
-            for output in self.outputs: 
-                for elm in output: 
-                    all_outputs = np.append(all_outputs, elm)
-
-            self.side_outputs = [all_outputs]
-            for i in range(self.side_depth - 1):
-                self.side_outputs.append(self.activation_function(np.dot(self.side_outputs[-1], self.side_weights[i]) + self.side_biases[i]))
-            print("side_outputs", self.side_outputs) #(1,32,2)[[(,),(,),,,,,,,,,,...]]
-
-        # return self.side_outputs[-1] if side_pass else self.outputs[-1]
-
-    def backward(self, y, no_side_gradients = False):
-        """
-        Performs backward propagation and update the network's weights and biases.
-
-        :param np.ndarray y: True labels of shape (n_samples, output_dim).
-        :param np.ndarray output: Output from the forward propagation of shape (output_dim).
-        """
-
-        if self.side_pass:
-            side_deltas = [None] * (self.side_depth - 1)
-            side_deltas[-1] = (y - np.array(self.side_outputs[-1])) * self.softmax_derivative(np.array(self.side_outputs[-1]))
-            for i in range(self.side_depth - 2, 0, -1):
-                side_deltas.append(np.dot(side_deltas[-1], self.side_weights[i].T) * self.activation_function_derivative(np.array(self.side_outputs[i])))
-                
-            if not no_side_gradients:
-                for i in range(self.side_depth - 1): 
-                    self.side_weights[-(i+1)] += np.dot(np.array(self.side_outputs[-(i+2)]).T, side_deltas[i]) * self.learning_rate
-                    self.side_biases[-(i+1)] += np.sum(side_deltas[i], axis=0, keepdims=True) * self.learning_rate
+    Returns:
+        accuracy: Accuracy on test set
+        train_time: Time taken for training
+        inference_time: Time taken for inference
+    """
+    # Define loss function and optimizer
+    criterion = nn.NLLLoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    
+    # Move model to device
+    model.to(device)
+    
+    # Train the model
+    model.train()
+    train_start = time.perf_counter()
+    
+    for epoch in range(epochs):
+        running_loss = 0.0
+        for images, labels in train_loader:
+            # Zero the gradients
+            optimizer.zero_grad()
             
-        deltas = [None] * (self.depth - 1)
-        deltas[-1] = (side_deltas[-1] if self.side_pass else y - np.array(self.outputs[-1])) * self.softmax_derivative(np.array(self.outputs[-1]))
-
-        # Propagate the error backwards
-        for i in range(self.depth - 2, 0, -1):
-            deltas[i-1] = np.dot(deltas[i], self.weights[i].T) * self.activation_function_derivative(np.array(self.outputs[i]))
-
-        # Update weights and biases
-        for i in range(self.depth - 1):
-            self.weights[i] += np.dot(np.array(self.outputs[i]).T, deltas[i]) * self.learning_rate
-            self.biases[i] += np.sum(deltas[i], axis=0, keepdims=True) * self.learning_rate
-
-    def deterministic_choose(self, X):
-        """
-        Chooses the class of the input.
-        """
-        self.forward(X)
-        outputs = self.side_outputs[-1] if self.side_pass else self.outputs[-1]
-        choices = np.zeros((len(outputs), 10))
-        in_loop = range(len(outputs[0]))
-        for i, output in enumerate(outputs):
-            max = 0
-            for j in in_loop:       
-                if output[j] > max:
-                    max = output[j]
-                    max_index = j
-            choices[i][max_index] = 1
-        print("choices", choices)
-        return choices
+            # Forward pass
+            outputs = model(images)
+            
+            # Calculate loss
+            loss = criterion(outputs, torch.argmax(labels, dim=1))
+            
+            # Backward pass and optimize
+            loss.backward()
+            optimizer.step()
+            
+            running_loss += loss.item()
+            
+        print(f"Epoch {epoch+1}/{epochs} - Loss: {running_loss/len(train_loader):.4f}")
     
-    def stochastic_choose(self, X):
-        """
-        Chooses the class of the input.
-        """
-        self.forward(X)
-        outputs = self.side_outputs[-1] if self.side_pass else self.outputs[-1]
-        choices = []
-        for output in outputs:
-            choices.append(np.random.choice(len(output), p=output))
-        return choices
-    def train(self, X, y, epochs=10000):
-        """
-        Train the neural network using the provided data.
+    train_end = time.perf_counter()
+    train_time = train_end - train_start
+    
+    # Test the model
+    model.eval()
+    inference_start = time.perf_counter()
+    
+    correct = 0
+    total = 0
+    
+    with torch.no_grad():
+        for images, labels in test_loader:
+            outputs = model(images)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == torch.argmax(labels, dim=1)).sum().item()
+    
+    inference_end = time.perf_counter()
+    inference_time = inference_end - inference_start
+    
+    accuracy = correct / total
+    
+    return accuracy, train_time, inference_time
 
-        :param np.ndarray X: Input data of shape (n_samples, input_dim).
-        :param np.ndarray y: True labels of shape (n_samples, output_dim).
-        :param int epochs: Number of training iterations.
-        """
-        '''tick = 0
-        avg_loss = 0'''
-        for epoch in range(1,epochs+1):
-            self.learning_rate *= (1 - self.learning_rate_decay)
-            self.forward(X)
-            print("forward done")
-            self.backward(y)
-            print("epoch", epoch, "done")
-            # TODO: change this to a more appropriate loss function i.e. cross entropy
-            '''loss = np.mean((y - output) ** 2)
-            avg_loss += loss
-            # Print loss every so many epochs
-            if epoch % (epochs/10) == 0:
+def benchmark_batch_sizes(batch_sizes=[32, 64, 128, 256, 512, 1024]):
+    """
+    Benchmark different batch sizes to find the optimal configuration for M3 GPU
+    
+    Parameters:
+        batch_sizes: List of batch sizes to test
+    """
+    # Initialize MNIST data loader
+    mndata = MNIST('/Users/andrewceniccola/Desktop/cajal/MNIST/raw')
 
-                # print(f'Epoch {epoch}, Loss: {loss:.3f}')
-                if tick == 0:
-                    tick = 1
-                    avg_loss_old = avg_loss
-                elif avg_loss > avg_loss_old - .001: # we have converged #NOTE: .001 is hardcoded for now. 
-                    break
-                else:
-                    avg_loss_old = avg_loss
+    # Load the training data
+    train_images, train_labels = mndata.load_training()
+    test_images, test_labels = mndata.load_testing()
+    
+    # Set device to MPS if available
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    print(f"Running benchmark on device: {device}")
+    
+    # Convert images to normalized float tensors
+    train_images = torch.tensor(train_images, dtype=torch.float32, device=device) / 255.0
+    test_images = torch.tensor(test_images, dtype=torch.float32, device=device) / 255.0
+    
+    # One-hot encode labels
+    train_label_indices = torch.tensor([train_labels], device=device).t()
+    train_labels = torch.zeros(len(train_labels), 10, device=device)
+    train_labels.scatter_(1, train_label_indices, 1)
+    
+    test_label_indices = torch.tensor([test_labels], device=device).t()
+    test_labels = torch.zeros(len(test_labels), 10, device=device)
+    test_labels.scatter_(1, test_label_indices, 1)
+    
+    print(f"Data loaded: {len(train_images)} training samples, {len(test_images)} test samples")
+    
+    # Store results for each batch size
+    results = {}
+    
+    for batch_size in batch_sizes:
+        print(f"\n--- Testing batch size: {batch_size} ---")
+        
+        # Create data loaders with current batch size
+        train_dataset = TensorDataset(train_images, train_labels)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
+        
+        test_dataset = TensorDataset(test_images, test_labels)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
+        
+        # Set seed for reproducibility
+        torch.manual_seed(42)
+        
+        # Create model
+        model = MNISTNet(input_dim=784, hidden_dim=264, output_dim=10)
+        
+        # Run training and measure performance
+        accuracy, train_time, inference_time = train_model(
+            model=model,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            device=device,
+            epochs=1,
+            learning_rate=0.01
+        )
+        
+        # Store results
+        results[batch_size] = {
+            'accuracy': accuracy,
+            'train_time': train_time,
+            'inference_time': inference_time,
+            'total_time': train_time + inference_time
+        }
+        
+        print(f"Batch size {batch_size}: Accuracy = {accuracy:.4f}, Train time: {train_time:.4f}s, Inference time: {inference_time:.4f}s")
+    
+    # Find optimal batch size
+    optimal_batch_size = min(results.keys(), key=lambda x: results[x]['total_time'])
+    
+    print("\n--- Benchmark Results ---")
+    print(f"Optimal batch size for M3 Mac GPU: {optimal_batch_size}")
+    print(f"Optimal performance: Accuracy = {results[optimal_batch_size]['accuracy']:.4f}, Time = {results[optimal_batch_size]['total_time']:.4f}s")
+    
+    # Plot results
+    batch_sizes = list(results.keys())
+    train_times = [results[bs]['train_time'] for bs in batch_sizes]
+    inference_times = [results[bs]['inference_time'] for bs in batch_sizes]
+    accuracies = [results[bs]['accuracy'] for bs in batch_sizes]
+    
+    # Create plot
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+    
+    # Plot training and inference times
+    ax1.plot(batch_sizes, train_times, 'b-o', label='Training Time')
+    ax1.plot(batch_sizes, inference_times, 'r-o', label='Inference Time')
+    ax1.set_xlabel('Batch Size')
+    ax1.set_ylabel('Time (seconds)')
+    ax1.set_title('Training and Inference Times vs. Batch Size on M3 Mac GPU')
+    ax1.grid(True)
+    ax1.legend()
+    
+    # Plot accuracy
+    ax2.plot(batch_sizes, accuracies, 'g-o')
+    ax2.set_xlabel('Batch Size')
+    ax2.set_ylabel('Accuracy')
+    ax2.set_title('Accuracy vs. Batch Size')
+    ax2.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig('batch_size_benchmark.png')
+    print("Benchmark plot saved to batch_size_benchmark.png")
+    
+    return results, optimal_batch_size
 
-                avg_loss = 0'''
-
-
-if __name__ == "__main__":
-    tries = 10
-    failures = 0
+def run_mnist_benchmark(batch_size=256):
+    """Train an MNIST model with GPU acceleration on M3 Mac."""
+    tries = 5  # Reduced number of tries to demonstrate performance
     
     # Initialize MNIST data loader
     mndata = MNIST('/Users/andrewceniccola/Desktop/cajal/MNIST/raw')
 
     # Load the training data
-    images, labels = mndata.load_training()
-    labels = np.array([[1 if labels[i] == j else 0 for j in range(10)] for i in range(len(labels))])
-
+    train_images, train_labels = mndata.load_training()
     test_images, test_labels = mndata.load_testing()
-    test_labels = np.array([[1 if test_labels[i] == j else 0 for j in range(10)] for i in range(len(test_labels))])
-    print("labels", labels)
-    print("test labels", test_labels)
+    
+    # Set device to MPS if available
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    print(f"Using device: {device}")
+    
+    # Convert images to normalized float tensors
+    train_images = torch.tensor(train_images, dtype=torch.float32, device=device) / 255.0
+    test_images = torch.tensor(test_images, dtype=torch.float32, device=device) / 255.0
+    
+    # One-hot encode labels
+    train_label_indices = torch.tensor([train_labels], device=device).t()
+    train_labels = torch.zeros(len(train_labels), 10, device=device)
+    train_labels.scatter_(1, train_label_indices, 1)
+    
+    test_label_indices = torch.tensor([test_labels], device=device).t()
+    test_labels = torch.zeros(len(test_labels), 10, device=device)
+    test_labels.scatter_(1, test_label_indices, 1)
+    
+    # Create data loaders for batch processing
+    train_dataset = TensorDataset(train_images, train_labels)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
+    
+    test_dataset = TensorDataset(test_images, test_labels)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
+    
+    print(f"Data loaded: {len(train_images)} training samples, {len(test_images)} test samples")
+    
+    # Track benchmark results
+    accuracies = []
+    train_times = []
+    inference_times = []
+    
     start_time = time.perf_counter()
-    print("start time", start_time)
+    
     for i in range(tries):
-
-        np.random.seed(1200+i) # this actually only works well under certain initial weights. We need to be able to create a general working model. 
-
-        # make a NeuralNetwork instance with 2 input values, 2 hidden neurons, and 1 output value
-        nn = NaiveSideNet(784, 10, 264, 2,  activation_function = "relu", learning_rate=0.1)
-        print("nn made")
-        # train our network
-        nn.train(images, labels, epochs=1)
-        print("full train done")
-
-        # test our trained network
-        output = nn.deterministic_choose(test_images)
-        if output != test_labels:
-            failures += 1
-            print("We failed. failures = ", failures, "output", output, "should be", test_labels)
-
+        # Set seed for reproducibility
+        torch.manual_seed(1200 + i)
+        
+        # Create a model instance
+        model = MNISTNet(input_dim=784, hidden_dim=264, output_dim=10)
+        
+        # Train and evaluate model
+        accuracy, train_time, inference_time = train_model(
+            model=model,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            device=device,
+            epochs=1,
+            learning_rate=0.01
+        )
+        
+        accuracies.append(accuracy)
+        train_times.append(train_time)
+        inference_times.append(inference_time)
+        
+        print(f"Trial {i+1}: Accuracy = {accuracy:.4f}, Train time: {train_time:.4f}s, Inference time: {inference_time:.4f}s")
+    
     end_time = time.perf_counter()
-    print("accuracy:", (tries-failures)/tries, "\naverage time (seconds): ", (end_time - start_time)/tries) # time includes train/test time for each weight initialization
+    total_time = end_time - start_time
+    
+    # Print performance results
+    print("\n--- Performance Results ---")
+    print(f"Average accuracy: {sum(accuracies)/len(accuracies):.4f}")
+    print(f"Average train time: {sum(train_times)/len(train_times):.4f} seconds")
+    print(f"Average inference time: {sum(inference_times)/len(inference_times):.4f} seconds")
+    print(f"Total execution time: {total_time:.4f} seconds")
+    
+    # Performance comparison with original implementation
+    print("\n--- GPU Optimization Results ---")
+    print(f"Batch size: {batch_size}")
+    print(f"Using PyTorch nn.Module and optimized operations")
+    print(f"Using MPS backend on M3 Mac")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='MNIST Training on M3 Mac GPU')
+    parser.add_argument('--benchmark', action='store_true', help='Run batch size benchmark')
+    parser.add_argument('--batch-size', type=int, default=256, help='Batch size for training')
+    args = parser.parse_args()
+    
+    if args.benchmark:
+        benchmark_batch_sizes()
+    else:
+        run_mnist_benchmark(batch_size=args.batch_size)
 
 '''# Initialize MNIST data loader
 mndata = MNIST('/Users/andrewceniccola/Desktop/cajal/MNIST/raw')
