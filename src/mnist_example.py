@@ -291,7 +291,7 @@ def run_mnist_benchmark(batch_size=256):
         inference_times.append(inference_time)
         
         print(f"Trial {i+1}: Accuracy = {accuracy:.4f}, Train time: {train_time:.4f}s, Inference time: {inference_time:.4f}s")
-    
+
     end_time = time.perf_counter()
     total_time = end_time - start_time
     
