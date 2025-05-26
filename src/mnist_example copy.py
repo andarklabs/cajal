@@ -1,5 +1,4 @@
 from mnist import MNIST
-import random
 import torch
 import time
 

@@ -1,5 +1,4 @@
 from mnist import MNIST
-import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -305,8 +304,8 @@ def run_mnist_benchmark(batch_size=256):
     # Performance comparison with original implementation
     print("\n--- GPU Optimization Results ---")
     print(f"Batch size: {batch_size}")
-    print(f"Using PyTorch nn.Module and optimized operations")
-    print(f"Using MPS backend on M3 Mac")
+    print("Using PyTorch nn.Module and optimized operations")
+    print("Using MPS backend on M3 Mac")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='MNIST Training on M3 Mac GPU')
@@ -318,16 +317,3 @@ if __name__ == "__main__":
         benchmark_batch_sizes()
     else:
         run_mnist_benchmark(batch_size=args.batch_size)
-
-'''# Initialize MNIST data loader
-mndata = MNIST('/Users/andrewceniccola/Desktop/cajal/MNIST/raw')
-
-# Load the training data
-images, labels = mndata.load_training()
-test_images, test_labels = mndata.load_testing()
-
-# Get a random index
-index = random.randrange(0, len(images)) 
-
-# Display the image
-print(mndata.display(images[index])) '''
