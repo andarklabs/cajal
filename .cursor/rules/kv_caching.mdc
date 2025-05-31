@@ -1,0 +1,77 @@
+---
+description: Cursorrules for KV Caching in MSL Kernels (.cursor/rules/kv_caching.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for KV Caching in MSL Kernels (.cursor/rules/kv_caching.mdc)
+
+// Phase: 3 - Model Assembly & Training Orchestration (Inference Part)
+// Component: Task 3.4 Inference/Text Generation (Specifically MSL KV Cache Handling)
+
+// Rule: Purpose of KV Cache Kernels
+// Description: During autoregressive inference, the K (Key) and V (Value) tensors from self-attention layers are cached. This avoids recomputing K and V for the entire history of tokens at each new token generation step, significantly speeding up inference.
+// Applies to: MSL Attention Kernels (variants for inference).
+
+// Rule: Cache Structure in Buffers
+// Description: For each attention layer in the Transformer, two `MTLBuffer`s will store the KV cache: one for K, one for V. 
+// Dimensions: `(batch_size, num_heads, max_sequence_length, head_dim)`.
+// `max_sequence_length` is the maximum length the model can handle or generate.
+// Data Type: Typically `half` to match K,V vectors.
+// Applies to: Host C++ (buffer allocation), MSL kernels (accessing cache).
+
+// Rule: Inference-Mode QKV Projection Kernel
+// Description: The QKV projection kernel, when run during inference for a *single new token* (or a very short new segment):
+//  - Computes Q_new, K_new, V_new only for the new input token(s).
+//  - K_new and V_new are then written into the appropriate slots in the global KV cache buffers at the current sequence position index.
+// Input: Current token embedding(s), Weights (Wq, Wk, Wv).
+// Output: Q_new, and side effect of updating K_cache, V_cache.
+// Applies to: MSL QKV Projection Kernel (inference variant).
+
+// Rule: Updating Cache - Indexing
+// Description: A `current_sequence_position` (or `attention_step`) index (integer) must be passed to the QKV projection kernel (or known by it). This index indicates where the newly computed K_new, V_new should be written in the K_cache and V_cache buffers.
+// `K_cache[batch_idx, head_idx, current_sequence_position, dim_idx] = K_new_element;`
+// Applies to: MSL QKV Projection Kernel (inference variant), Host C++ (managing and passing current position).
+
+// Rule: Inference-Mode Scaled Dot-Product Attention Kernel
+// Description: The scaled dot-product attention kernel, during inference:
+//  - Takes Q_new (for the current token) and the *full* K_cache and V_cache buffers.
+//  - Computes attention scores: `Q_new @ K_cache^T` (where K_cache effectively contains keys up to `current_sequence_position`). The K_cache might be used directly or a transposed view if optimal.
+//  - No causal masking is needed in the traditional sense, as Q_new only attends to past and current K values in the cache.
+//  - Applies softmax to scores.
+//  - Computes context vector: `AttentionWeights @ V_cache`.
+// Applies to: MSL Scaled Dot-Product Attention Kernel (inference variant).
+
+// Rule: Attention Span in Cache
+// Description: The attention calculation `Q_new @ K_cache^T` should effectively only consider entries in `K_cache` up to `current_sequence_position`. This can be handled by how K_cache is structured/passed or by dynamically adjusting matrix multiplication dimensions if the kernel is generic.
+// Applies to: MSL Scaled Dot-Product Attention Kernel (inference variant).
+
+// Rule: Data Layout for Cache Efficiency
+// Description: The layout of K_cache and V_cache should be chosen for efficient reads during the `Q @ K^T` and `Scores @ V` operations. Consider if K_cache should be stored pre-transposed for the `Q @ K^T` step.
+// E.g., K_cache as (B, H, max_S, D_h) or K_cache_transposed as (B, H, D_h, max_S).
+// Applies to: MSL kernel design (data access patterns).
+
+// Rule: Batching with KV Cache
+// Description: If batching inference requests, each item in the batch needs its own independent section of the KV cache buffers or separate cache buffers. The `batch_idx` is crucial for indexing correctly.
+// Handling variable lengths within a batch during generation with a KV cache requires careful management (e.g., stopping generation for completed sequences in the batch while others continue, and ensuring cache reads/writes are correct for active sequences).
+// Applies to: MSL kernels (batch_idx usage), Host C++ (batch management).
+
+// Rule: Resetting/Initializing Cache
+// Description: Before starting a new generation sequence (or a new batch of sequences), the KV cache does not strictly need to be zeroed if indexing is handled correctly and previous data is overwritten or ignored. However, for clarity or specific strategies, explicit reset/management might be considered by the host.
+// Applies to: Host C++ (inference setup).
+
+// Rule: Testing (TDD) - KV Caching Kernels
+// Description:
+//  - **Test QKV Projection (Inference Variant):**
+//    - Provide input for a single new token, known weights.
+//    - Initialize K_cache, V_cache (e.g., with some prior dummy data or zeros).
+//    - Provide `current_sequence_position`.
+//    - Execute kernel. Verify Q_new is correct.
+//    - Read back K_cache, V_cache. Verify that *only* the slice at `current_sequence_position` was updated with the new K,V and other parts of the cache remain untouched.
+//  - **Test Scaled Dot-Product Attention (Inference Variant):**
+//    - Prepare Q_new (for current token).
+//    - Populate K_cache, V_cache with known historical K,V values up to `current_sequence_position - 1` and the K_new, V_new at `current_sequence_position`.
+//    - Manually (or with Python/PyTorch) calculate the expected context vector using Q_new and the populated K_cache, V_cache (attending to all history + current).
+//    - Execute the MSL kernel. Read back and verify the context vector.
+//  - Test with different `current_sequence_position` values (start, middle, near max_sequence_length).
+//  - Test batched KV caching if implemented.
+// Applies to: MSL kernel code (inference variants), Host C++/Swift test harness.

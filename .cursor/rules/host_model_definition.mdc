@@ -1,0 +1,59 @@
+---
+description: Cursorrules for Host Model Definition (.cursor/rules/host_model_definition.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for Host Model Definition (.cursor/rules/host_model_definition.mdc)
+
+// Phase: 3 - Model Assembly & Training Orchestration
+// Component: Task 3.1 Model Definition (Host Code)
+
+// Rule: Model Configuration Structure
+// Description: Define a clear C++ struct or class (e.g., `TransformerConfig`) to hold all model hyperparameters: vocab_size, sequence_length, embedding_dim, ffn_hidden_dim, num_heads, head_dim, num_decoder_layers, dropout_rate (if used), epsilon for LayerNorm, etc.
+// This configuration should be easily loadable (e.g., from a file or command-line arguments).
+// Applies to: Host C++ code.
+
+// Rule: Metal Objects Management
+// Description: The host model class (e.g., `TransformerModel`) will be responsible for owning and managing core Metal objects: `MTLDevice`, `MTLCommandQueue`, `MTLLibrary` (compiled from MSL shaders).
+// It will also create and store `MTLComputePipelineState` objects for each MSL kernel used in the model.
+// Applies to: Host C++ code.
+
+// Rule: Layer Representation
+// Description: Represent Transformer layers (Embedding, Attention, FFN, LayerNorm) as C++ classes or structs. Each layer class will manage its own weights (`MTLBuffer`s), biases (`MTLBuffer`s), and potentially its specific `MTLComputePipelineState` if kernels are highly specialized per layer type.
+// Example: `EmbeddingLayer` class, `AttentionLayer` class, `FeedForwardLayer` class, `DecoderBlock` class (comprising Attention, FFN, LayerNorms).
+// Applies to: Host C++ code.
+
+// Rule: Parameter Allocation
+// Description: The main model class, upon initialization with a `TransformerConfig`, should allocate all necessary `MTLBuffer`s for model parameters (weights, biases) with `MTLStorageModeShared`. Buffer sizes are determined by the config.
+// Applies to: Host C++ code.
+
+// Rule: Kernel Compilation and Pipeline State Creation
+// Description: Compile all MSL shaders from file or string into an `MTLLibrary` during model setup. Create `MTLComputePipelineState` objects for each kernel function (e.g., `embedding_lookup_pipeline`, `qkv_projection_pipeline`, etc.) from the library. Handle compilation errors robustly.
+// Applies to: Host C++ code.
+
+// Rule: Forward Pass Orchestration
+// Description: The model class should have a `forward` method that takes a batch of input token IDs (`MTLBuffer`) and a `MTLCommandBuffer`. This method will encode all the necessary kernel dispatches in the correct sequence to perform a full forward pass through the Transformer layers.
+// It will manage intermediate activation buffers if they need to be passed between kernels explicitly.
+// Applies to: Host C++ code.
+
+// Rule: Modularity in Host Code
+// Description: Design the host-side model representation to be modular. E.g., a `DecoderModel` class might contain a list of `DecoderBlock` objects, and each `DecoderBlock` would orchestrate its internal components.
+// Applies to: Host C++ code structure.
+
+// Rule: Memory Management for Buffers
+// Description: Ensure all `MTLBuffer`s (weights, activations, intermediate buffers) are properly managed and released when the model is destroyed or buffers are no longer needed. Use smart pointers (e.g., `std::shared_ptr` or `std::unique_ptr` with custom deleters for Metal objects if not using Objective-C ARC directly) or manual management with care.
+// Applies to: Host C++ code.
+
+// Rule: Interface for Activations (for Backward Pass)
+// Description: The forward pass, if training, needs to store necessary activations (e.g., inputs to LayerNorm, attention scores, FFN intermediate states) required by the backward pass. The model definition should consider how these activations will be stored and made accessible.
+// Applies to: Host C++ code (forward pass implementation).
+
+// Rule: Testing (TDD) - Host Model Definition & Setup
+// Description:
+//  - Test `TransformerConfig` loading and validation.
+//  - Test `MTLDevice`, `MTLCommandQueue`, `MTLLibrary` creation: verify they are not null/nil.
+//  - Test `MTLComputePipelineState` creation for each kernel: verify successful creation and that pipeline objects are correctly stored.
+//  - Test parameter `MTLBuffer` allocation: verify buffers are created with correct sizes (based on config) and storage mode.
+//  - Test a simplified forward pass call (without actual GPU execution initially, just checking kernel encoding logic if possible, or with mock kernels) to ensure command encoding sequence is logical.
+//  - Test model destruction: ensure no obvious memory leaks related to Metal objects (requires memory profiling tools or careful manual checks if not using ARC).
+// Applies to: Host C++ code.

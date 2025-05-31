@@ -1,0 +1,82 @@
+---
+description: Cursorrules for Inference & Text Generation (.cursor/rules/inference_generation.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for Inference & Text Generation (.cursor/rules/inference_generation.mdc)
+
+// Phase: 3 - Model Assembly & Training Orchestration
+// Component: Task 3.4 Inference/Text Generation
+
+// Rule: Autoregressive Decoding Loop
+// Description: Implement an autoregressive decoding loop on the host (C++). For each step:
+//  1. Take the current sequence of token IDs.
+//  2. Perform a forward pass of the Transformer model to get logits for the next token.
+//  3. Apply a sampling strategy (greedy, top-k, top-p/nucleus) to the logits to select the next token ID.
+//  4. Append the new token ID to the sequence.
+//  5. Repeat until an `[EOS]` token is generated or max sequence length is reached.
+// Applies to: Host C++ code.
+
+// Rule: KV Caching - Essential for Efficiency
+// Description: For efficient inference with decoder models, Key (K) and Value (V) tensors from all self-attention layers must be cached for previously generated tokens. For each new token, only its Q, K, V are computed, and its Q attends to its own K,V and all cached K,V from previous tokens.
+// This avoids recomputing K,V for the entire sequence at each step.
+// Applies to: MSL attention kernels (modified for caching), Host C++ code (managing cache buffers).
+
+// Rule: KV Cache Buffer Management
+// Description: Allocate `MTLBuffer`s for the KV cache. The cache dimensions per layer: (batch_size, num_heads, max_sequence_length, head_dim) for K and for V. Update these buffers incrementally.
+// For batched inference, manage cache indexing carefully if sequences in a batch have different actual lengths.
+// Applies to: Host C++ code.
+
+// Rule: Modified Attention Kernels for Inference
+// Description: The self-attention MSL kernels (QKV projection, scaled dot-product) need variants for inference that:
+//  - Accept current step K,V and existing KV cache buffers.
+//  - Append the current step's K,V to their respective cache buffers.
+//  - Perform attention using the current query against the *full updated* K,V cache.
+//  - No causal masking is applied in the same way as training (as we generate token by token, the "future" is not yet computed for the current Q).
+// Applies to: MSL kernel code.
+
+// Rule: Sampling Strategies
+// Description: Implement various sampling strategies in C++ (operating on CPU after logits are read back, or potentially as an MSL kernel if performance is critical for complex sampling on large vocabs):
+//  - **Greedy Search:** Pick the token ID with the highest logit.
+//  - **Temperature Scaling:** `logits /= temperature`. Apply before softmax if sampling based on probabilities.
+//  - **Top-K Sampling:** Filter logits to the top K most probable tokens, renormalize, then sample.
+//  - **Top-P (Nucleus) Sampling:** Select the smallest set of tokens whose cumulative probability exceeds P, renormalize, then sample.
+// Applies to: Host C++ code (primarily), potentially MSL for on-GPU sampling.
+
+// Rule: Batch Inference (Optional but good for throughput)
+// Description: If multiple independent sequences need to be generated, batch them. This requires careful handling of padding, KV cache indexing per batch item, and stopping criteria per sequence in the batch.
+// Applies to: Host C++ code, MSL kernels (to handle batch dimension).
+
+// Rule: Input Handling
+// Description: Provide a way to input a starting prompt (sequence of token IDs). Handle tokenization of text prompts using the trained tokenizer.
+// Applies to: Host C++ code.
+
+// Rule: Output Handling
+// Description: Convert the generated sequence of token IDs back to text using the detokenizer. Provide the generated text as output.
+// Applies to: Host C++ code.
+
+// Rule: Efficiency - Minimized Data Transfer
+// Description: Keep the autoregressive loop primarily on the GPU if possible. Only transfer minimal data (e.g., selected next token ID if sampling is on CPU) between GPU and CPU at each step.
+// Logits might need to be read back for CPU sampling, but this should be efficient for typical batch sizes (e.g., batch_size=1 for generation).
+// Applies to: Host C++ code design.
+
+// Rule: Testing (TDD) - Inference & Generation
+// Description:
+//  - Test KV Caching MSL Kernels:
+//    - Verify that K,V from current step are correctly appended to cache buffers.
+//    - Verify that attention calculation uses the full cache for Q_current @ K_cache^T.
+//  - Test Sampling Strategies (CPU-side):
+//    - Greedy: Given known logits, verify the correct max ID is chosen.
+//    - Temperature: Verify logits are correctly scaled.
+//    - Top-K: Given known logits and K, verify the correct subset is chosen and sampled from.
+//    - Top-P: Given known logits and P, verify the correct subset is chosen and sampled from.
+//  - Test Autoregressive Loop (Host C++):
+//    - Use a tiny, mock model (e.g., one that always predicts a fixed next token or cycles through a few tokens, with mock KV caching).
+//    - Provide an input prompt, run N generation steps.
+//    - Verify the generated sequence of token IDs matches the expected mock behavior.
+//    - Test EOS token handling and max length termination.
+//  - End-to-End Generation Test (with a very small, pre-trained or quickly trained model if possible):
+//    - Provide a simple prompt.
+//    - Generate a short sequence.
+//    - Qualitatively assess if the output is remotely plausible (early stages) or matches output from a reference implementation if available (later stages).
+// Applies to: MSL kernel code (KV cache variants), Host C++ code (loop, sampling, cache management).

@@ -1,0 +1,59 @@
+---
+description: Cursorrules for Tokenization (rules/tokenization.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for Tokenization (rules/tokenization.mdc)
+
+// Phase: 1 - Data Preprocessing & Tokenization
+// Component: Task 1.2 Tokenization
+
+// Rule: Tokenization Method - BPE Default
+// Description: Start with Byte Pair Encoding (BPE) as the primary tokenization strategy. Ensure the implementation allows for training a BPE model on the BookCorpus dataset.
+// Applies to: Host C++/Swift tokenization code.
+
+// Rule: Tokenizer Training - Representative Subset
+// Description: Train the tokenizer (e.g., BPE model) on a sufficiently large and representative subset of the BookCorpus data. Document the size and source of this subset.
+// Applies to: Tokenizer training script/code.
+
+// Rule: Special Tokens
+// Description: Define and handle special tokens consistently: `[PAD]` (padding), `[UNK]` (unknown), `[BOS]` (beginning of sequence), `[EOS]` (end of sequence). Ensure they have unique IDs and are handled correctly by the tokenizer and model.
+// Applies to: Tokenizer implementation, Model input processing.
+
+// Rule: Vocabulary Size - Configuration
+// Description: Make vocabulary size a configurable parameter. Document the chosen default size and considerations for changing it (e.g., 32,000 to 50,000 is common).
+// Applies to: Tokenizer training, Model architecture (embedding layer, output layer).
+
+// Rule: Tokenizer Persistence
+// Description: Save the trained tokenizer (vocabulary, merge rules for BPE, etc.) to disk. Implement functionality to load the saved tokenizer for consistent use during training and inference.
+// Applies to: Tokenizer implementation, Training/inference scripts.
+
+// Rule: Tokenization Efficiency
+// Description: The tokenizer implementation should be efficient for processing large amounts of text. Profile tokenization speed if it becomes a bottleneck in the data pipeline.
+// Applies to: Tokenizer implementation.
+
+// Rule: Out-of-Vocabulary Handling
+// Description: Implement robust handling for out-of-vocabulary (OOV) words/subwords. Typically, these should map to the `[UNK]` token.
+// Applies to: Tokenizer implementation.
+
+// Rule: Token ID Mapping
+// Description: Ensure a clear and consistent mapping between tokens (strings) and their integer IDs. This mapping forms the vocabulary.
+// Applies to: Tokenizer implementation.
+
+// Rule: Detokenization (Optional but Recommended)
+// Description: For debugging and evaluating model outputs, implement a detokenization function that can convert sequences of token IDs back into human-readable text. This is the reverse of the tokenization process.
+// Applies to: Tokenizer implementation, Evaluation scripts.
+
+// Rule: Tokenizer Interface
+// Description: Define a clear interface for the tokenizer, e.g., `tokenize(text: string) -> list[int]` and `detokenize(ids: list[int]) -> string`.
+// Applies to: Tokenizer implementation.
+// Rule: Testing (TDD) - Tokenization
+// Description:
+//  - Test BPE training with a small corpus: verify vocabulary generation and merge rule creation.
+//  - Test `tokenize` function: provide sample sentences and verify the output token ID sequences against expected sequences (manually tokenized or using a reference BPE tool).
+//  - Test handling of special tokens (`[PAD]`, `[UNK]`, `[BOS]`, `[EOS]`) during tokenization.
+//  - Test handling of OOV words (should map to `[UNK]` token ID).
+//  - Test `detokenize` function: provide token ID sequences (including special tokens) and verify they are converted back to the correct text.
+//  - Test tokenizer persistence: save a trained tokenizer, load it, and verify it produces the same results.
+// Applies to: Host C++/Swift tokenization code.
+

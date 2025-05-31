@@ -1,0 +1,61 @@
+---
+description: Cursorrules for Embedding Layer (rules/embedding_layer.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for Embedding Layer (rules/embedding_layer.mdc)
+
+// Phase: 2 - MSL Kernel Implementation
+// Component: Task 2.1 Embedding Layer
+
+// Rule: Kernel Function Signature
+// Description: The MSL kernel for embedding lookup should take the input token IDs (`device const uint*`), the embedding weight matrix (`device const half*` or `device const float*`), the output buffer (`device half*` or `device float*`), vocabulary size, embedding dimension, and sequence length as arguments.
+// Example: `kernel void embedding_lookup(device const uint* token_ids [[buffer(0)]], device const half* weights [[buffer(1)]], device half* output_embeddings [[buffer(2)]], constant uint vocab_size [[buffer(3)]], constant uint embedding_dim [[buffer(4)]], constant uint sequence_length [[buffer(5)]], uint gid [[thread_position_in_grid]])`
+// Applies to: MSL kernel code.
+
+// Rule: Input Token IDs
+// Description: Input token IDs will be `uint` (or `uint32_t`). Ensure the kernel correctly indexes into the weight matrix using these IDs.
+// Applies to: MSL kernel code, Host C++/Swift data preparation.
+
+// Rule: Embedding Weight Matrix
+// Description: The embedding weight matrix (vocab_size x embedding_dim) should be stored in a `MTLBuffer` using `MTLStorageModeShared`. Prefer `half` precision for weights unless `float` is proven necessary for model quality.
+// Applies to: MSL kernel code, Host C++/Swift weight initialization and buffer creation.
+
+// Rule: Output Embeddings
+// Description: The output buffer will store the resulting embeddings (batch_size x sequence_length x embedding_dim). The data type should match the weights (`half` or `float`).
+// Applies to: MSL kernel code, Host C++/Swift buffer allocation.
+
+// Rule: Lookup Logic
+// Description: Each thread in the grid will typically handle one token. The thread calculates the offset into the weight matrix based on `token_id * embedding_dim` and copies `embedding_dim` elements to the output buffer at the correct position.
+// Applies to: MSL kernel code.
+
+// Rule: Dispatch Grid
+// Description: The host code should dispatch a 1D grid of threads, typically `batch_size * sequence_length`. Each thread computes the embedding for one token in the batch.
+// Applies to: Host C++/Swift kernel dispatch code.
+
+// Rule: Boundary Checks (Optional but Good Practice)
+// Description: While input token IDs should ideally be validated before reaching the GPU, adding a bounds check (`token_id < vocab_size`) within the kernel can prevent out-of-bounds reads if invalid data is passed, though this adds a slight overhead.
+// Applies to: MSL kernel code.
+
+// Rule: Data Type Consistency
+// Description: Ensure that the data type used for weights (e.g., `half`) is consistently used for the embedding vector elements being read and written.
+// Applies to: MSL kernel code.
+
+// Rule: Threadgroup Assignment
+// Description: For a simple embedding lookup, each thread often works independently. Threadgroup assignment is less critical than in more complex kernels, but ensure the total number of threads matches the workload (batch_size * sequence_length).
+// Applies to: MSL kernel [[attribute]] and host dispatch configuration.
+
+// Rule: Embedding Layer Gradients (Forward-looking for Backpropagation)
+// Description: The gradient of the embedding layer is a scatter-add operation. The gradients w.r.t. the output embeddings are gathered and added to the rows of the embedding weight matrix corresponding to the input token IDs. This will be handled in a separate backward pass kernel.
+// Applies to: Design consideration for future backward pass implementation.
+
+// Rule: Testing (TDD) - Embedding Kernel
+// Description:
+//  - Prepare a small, known embedding weight matrix (e.g., 5 vocab x 4 dim).
+//  - Prepare a batch of input token ID sequences (e.g., 2 batch x 3 seq_len).
+//  - Manually (or with Python/NumPy) calculate the expected output embedding vectors.
+//  - Create Metal buffers for inputs (token IDs, weights) and outputs.
+//  - Execute the MSL embedding_lookup kernel.
+//  - Read back the output buffer from GPU and compare its contents (element-wise with tolerance for `half`/`float`) against the pre-calculated expected embeddings.
+//  - Test with token IDs at vocabulary boundaries and `[UNK]` if applicable.
+// Applies to: MSL kernel code, Host C++/Swift test harness.

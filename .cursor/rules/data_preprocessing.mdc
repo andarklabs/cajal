@@ -1,0 +1,62 @@
+---
+description: Cursorrules for Data Preprocessing (rules/data_preprocessing.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for Data Preprocessing (rules/data_preprocessing.mdc)
+
+// Phase: 1 - Data Preprocessing & Tokenization
+// Component: Task 1.1 Data Loading & Cleaning, Task 1.3 Data Formatting for MSL
+
+// Rule: Data Loading - Stream Processing
+// Description: For large text files (like BookCorpus), implement stream processing on the CPU (C++/Swift) to avoid loading the entire dataset into memory at once. Read and process data in chunks.
+// Applies to: Host C++/Swift data loading code.
+
+// Rule: Data Loading - Character Encoding
+// Description: Assume UTF-8 encoding for input text files. Handle potential encoding errors gracefully, perhaps by logging and skipping problematic characters/lines based on a defined policy.
+// Applies to: Host C++/Swift data loading code.
+
+// Rule: Data Cleaning - Configurable Steps
+// Description: Make text cleaning steps (e.g., whitespace normalization, lowercasing, special character removal/replacement) configurable. Document the default cleaning pipeline.
+// Applies to: Host C++/Swift data cleaning code.
+
+// Rule: Data Cleaning - Whitespace Normalization
+// Description: Normalize multiple whitespace characters (spaces, tabs, newlines) into a single space, or handle newlines meaningfully if they denote sentence/paragraph boundaries relevant to the task.
+// Applies to: Host C++/Swift data cleaning code.
+
+// Rule: Data Cleaning - Case Sensitivity
+// Description: Default to lowercasing all text, but allow this to be configurable, as case might be important for some tokenization strategies or specific model variants.
+// Applies to: Host C++/Swift data cleaning code.
+
+// Rule: Data Formatting - MSL Integer Types
+// Description: Convert tokenized sequences into `uint32` for MSL buffer compatibility. If vocabulary size is guaranteed to be very small (<65536) AND profiling shows a benefit, `uint16` could be an optimization, but `uint32` is the safer default for alignment and general vocab sizes.
+// Applies to: Host C++/Swift data formatting code.
+
+// Rule: Data Formatting - Padding and Truncation
+// Description: Implement padding for shorter sequences and truncation for longer sequences to create fixed-length input for MSL kernels. Use a specific `[PAD]` token ID for padding.
+// Applies to: Host C++/Swift data formatting code.
+
+// Rule: Data Formatting - Batching Strategy
+// Description: Data should be prepared in batches. The host code is responsible for creating these batches of fixed-length token ID sequences from the preprocessed and tokenized dataset.
+// Applies to: Host C++/Swift batch generation code.
+
+// Rule: Data Formatting - Buffer Alignment
+// Description: When creating `MTLBuffer`s from tokenized data, ensure data alignment meets Metal requirements. `MTLDevice newBufferWithBytes:length:options:` typically handles this if length is appropriate.
+// Applies to: Host C++/Swift Metal buffer creation code.
+
+// Rule: Preprocessing Reproducibility
+// Description: Ensure the entire data preprocessing pipeline (loading, cleaning, tokenization, formatting) is deterministic. Given the same input data and configuration, it should always produce the exact same output, which is crucial for reproducible training.
+// Applies to: Entire data preprocessing pipeline.
+
+// Rule: Preprocessed Data Caching
+// Description: Consider caching the fully preprocessed (tokenized and formatted) data to disk after the first run to speed up subsequent training sessions, especially if preprocessing is time-consuming. Include metadata (e.g., tokenizer used, sequence length) with the cache.
+// Applies to: Host C++/Swift data pipeline.
+// Rule: Testing (TDD) - Data Preprocessing
+// Description: 
+//  - Test data loading with sample small text files, including edge cases (empty files, files with unusual characters, different line endings if applicable).
+//  - Test cleaning functions: verify whitespace normalization, lowercasing, and special character handling with known input strings and expected outputs.
+//  - Test data formatting: ensure token sequences are correctly padded/truncated to the specified sequence length, and that `[PAD]` tokens are used appropriately.
+//  - Test batch generation: verify correct batch dimensions and content.
+//  - For all tests, compare outputs against manually verified or script-generated expected results.
+// Applies to: Host C++/Swift data loading, cleaning, and formatting code.
+

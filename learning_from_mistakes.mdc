@@ -1,0 +1,44 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+## C++ String Literals for Special Characters
+
+**Mistake:** Using `\\'\\n\'` (double backslash n) in a C++ string or character literal when intending to represent a single newline character.
+
+**Correction:** Use `'\\n'` for a newline character literal or `"...\\n..."` for a newline character within a string literal.
+
+**Explanation:**
+In C++ string and character literals, a single backslash `\` is the escape character.
+- `'\n'` correctly represents the single newline character.
+- `'\\\\n'` (or `"\\\\n"`) represents a literal backslash character followed by the letter 'n'. This was the error made, where `'\\n'` was used in the context of a tool that then further escaped the backslash, leading to `'\\\\n'` effectively being written in the C++ code by the tool, which the C++ compiler then treats as a multi-character literal or a sequence of characters `\` and `n` rather than a single newline control character.
+
+**Impact:** Incorrectly escaping special characters like newlines can lead to:
+- Compiler warnings (e.g., multi-character constant).
+- Incorrect string comparisons.
+- Unexpected behavior in functions that process these strings (e.g., text cleaning, parsing).
+
+**Rule:** Always use a single backslash for standard escape sequences in C++ string and character literals (e.g., `\n` for newline, `\t` for tab, `\\` for a literal backslash, `\"` for a literal double quote). When providing these as arguments to tools that might perform their own escaping, ensure the final code will have the correct single-backslash escape sequence.
+
+## Implementing Complex Algorithms with TDD
+
+**Approach:** When implementing complex algorithms (like BPE training), break them down into smaller, testable components and implement each one step-by-step.
+
+**BPE Training Example Strategy:**
+1. **Start with basic structure**: Implement placeholder methods that compile and basic tests that verify the setup (special tokens, basic encode/decode).
+2. **Implement core components individually**:
+   - `get_pair_frequencies()`: Count symbol pairs in corpus
+   - `merge_pair_in_word_counts()`: Apply a specific merge to word counts
+   - Build character vocabulary from corpus
+3. **Test each component**: Write unit tests for each method with small, controlled inputs.
+4. **Integrate step by step**: Gradually combine components into the full training algorithm.
+5. **Test with real data**: Once the algorithm works on simple cases, test with actual corpus data.
+
+**Benefits:**
+- Easier debugging when components are tested individually
+- Faster development cycles with focused tests
+- Better understanding of algorithm behavior
+- More maintainable and reliable code
+
+**Rule:** For algorithms with multiple interdependent steps, implement and test the helper methods first, then compose them into the main algorithm. Use small, predictable test cases to verify each step before moving to real-world data.

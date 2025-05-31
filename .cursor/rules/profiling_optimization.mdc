@@ -1,0 +1,79 @@
+---
+description: Cursorrules for Profiling & Optimization (.cursor/rules/profiling_optimization.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for Profiling & Optimization (.cursor/rules/profiling_optimization.mdc)
+
+// Phase: 4 - Optimization & Profiling
+// Components: Task 4.1 Performance Profiling, Task 4.2 Kernel Optimization, Task 4.3 Memory Optimization
+
+// Rule: Profiling Tools - Metal System Trace
+// Description: Regularly use Metal System Trace in Xcode as the primary tool for performance analysis. 
+// Focus on: GPU timeline (identifying long-running kernels, gaps, bubbles), shader Tiler/Renderer/Compute utilization, memory bandwidth (Device Memory, System Memory), occupancy for compute kernels, and CPU/GPU synchronization issues.
+// Applies to: Development workflow, Optimization iterations.
+
+// Rule: Profiling Tools - Metal Frame Capture / Shader Debugger
+// Description: Use Metal Frame Capture (Shader Debugger) to inspect intermediate buffer/texture contents, debug MSL kernel logic, and analyze GPU state at specific points. Also useful for initial performance metrics of individual dispatches.
+// Applies to: Debugging, Detailed kernel analysis.
+
+// Rule: Profiling Granularity - Identify Bottlenecks
+// Description: Start profiling at a high level (e.g., entire training step or inference step). Identify the most time-consuming parts (e.g., specific MSL kernels, data transfers if any not using Shared mode effectively). Drill down into optimizing these bottlenecks first (Amhdal's Law).
+// Applies to: Optimization strategy.
+
+// Rule: Kernel Optimization - Iterative Approach
+// Description: Optimization is an iterative process: Profile -> Identify Bottleneck -> Hypothesize Optimization -> Implement Change -> Profile Again -> Verify Improvement. If no improvement or regression, revert or rethink.
+// Applies to: MSL kernel optimization workflow.
+
+// Rule: Kernel Optimization - Threadgroup Sizing
+// Description: Experiment with `threads_per_threadgroup` for each compute kernel. The optimal size depends on register usage, threadgroup memory usage, and wave-front characteristics of the GPU. Profile different sizes to find the sweet spot for occupancy and performance.
+// Applies to: MSL kernel attributes, Optimization iterations.
+
+// Rule: Kernel Optimization - Memory Access Patterns
+// Description: Strive for coalesced memory access in MSL kernels. Avoid bank conflicts in threadgroup memory. Analyze memory access using Metal System Trace (e.g., memory traffic counters).
+// Consider data layout changes (e.g., SoA vs AoS, transposing matrices for matmul) if it improves access patterns.
+// Applies to: MSL kernel code, Data structure design.
+
+// Rule: Kernel Optimization - Data Types (`half` vs `float`)
+// Description: Maximize use of `half` precision for data (weights, activations, gradients, intermediate values) and computations, as M-series GPUs perform `half` ops significantly faster and it reduces memory bandwidth.
+// Use `float` only where necessary for precision/stability (e.g., loss accumulation, some parts of softmax, optimizer states).
+// Applies to: MSL kernel code, Optimization iterations.
+
+// Rule: Kernel Optimization - SIMD-Group & Threadgroup Matrix Operations
+// Description: Leverage Metal's SIMD-group functions (`simd_sum`, `simd_shuffle`, etc.) and especially `simdgroup_matrix_multiply_accumulate` or `threadgroup_matrix_multiply_accumulate` for matrix multiplications. These are highly optimized for Apple Silicon.
+// Applies to: MSL kernel code (matmul, reductions).
+
+// Rule: Kernel Optimization - Reducing Register Spilling
+// Description: High register usage can lead to spilling to threadgroup or device memory, slowing down kernels. If spilling is identified (via compiler reports or performance counters if available), try to reduce register pressure (e.g., fewer local variables, breaking complex expressions).
+// Applies to: MSL kernel code.
+
+// Rule: Kernel Optimization - Compiler Optimizations
+// Description: Trust the MSL compiler but be aware of its behavior. Check compiler output/diagnostics if available. Sometimes, slightly refactoring code can help the compiler achieve better optimization.
+// Use `[[ Nutzer(n) ]]` attribute for loops if manual unroll count is beneficial and compiler isn't doing it optimally.
+// Applies to: MSL kernel code.
+
+// Rule: Memory Optimization - Buffer Reuse / Aliasing
+// Description: Minimize `MTLBuffer` allocations. Reuse buffers for transient data where possible (e.g., activation buffers whose contents are no longer needed after a subsequent operation). Use `MTLHeap` for more fine-grained control over allocations if managing many transient buffers (advanced).
+// Applies to: Host C++ code (buffer management).
+
+// Rule: Memory Optimization - Gradient Accumulation (for Training)
+// Description: If training memory is constrained by batch size, use gradient accumulation. Process multiple smaller mini-batches, accumulate their gradients (on GPU in `float` buffers), and perform the optimizer step only after several mini-batches.
+// Trades more compute for less peak memory.
+// Applies to: Host C++ code (training loop logic).
+
+// Rule: Memory Optimization - Activation Recomputation (Gradient Checkpointing)
+// Description: As mentioned in backward_pass.mdc, if memory for storing forward-pass activations is a bottleneck, selectively recompute them during the backward pass instead of storing everything. This is an advanced technique trading compute for memory.
+// Applies to: Host C++ code (forward/backward pass logic).
+
+// Rule: Host-Side Optimization
+// Description: Don't neglect CPU-side bottlenecks. Profile host code (data loading, preprocessing, command buffer encoding). Optimize tight loops, reduce redundant operations, and ensure efficient data handling before GPU dispatch.
+// Use asynchronous Metal operations (`addCompletedHandler`, parallel encoders) to overlap CPU and GPU work.
+// Applies to: Host C++ code.
+
+// Rule: Testing (TDD) - Optimization Changes
+// Description:
+//  - **Benchmark Before and After:** Any optimization change (kernel modification, buffer strategy, etc.) must be benchmarked. Measure wall-clock time for the relevant section (e.g., specific kernel, full training step) and other metrics like memory usage.
+//  - **Verify Correctness:** After an optimization, re-run all relevant unit and integration tests to ensure the change did not break functionality or introduce unacceptable precision loss.
+//  - **Isolate Changes:** Test one optimization at a time to clearly attribute performance changes.
+//  - **Regression Testing:** Maintain a small suite of performance benchmarks that are run regularly to catch performance regressions as new features are added or code is refactored.
+// Applies to: Development workflow, Optimization iterations.

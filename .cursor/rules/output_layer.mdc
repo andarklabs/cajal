@@ -1,0 +1,73 @@
+---
+description: Cursorrules for Final Output Layer (rules/output_layer.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for Final Output Layer (rules/output_layer.mdc)
+
+// Phase: 2 - MSL Kernel Implementation
+// Component: Task 2.6 Final Linear Layer & Softmax (Output Layer)
+
+// Rule: Kernel Function - Linear Projection to Logits
+// Description: This kernel projects the final hidden states from the last Transformer block to vocabulary-sized logits.
+// Inputs: Final hidden states. Weights (and bias) for the linear layer. Output: Logits.
+// Example: `kernel void output_logits_projection(device const half* final_hidden_states [[buffer(0)]], device const half* W_out [[buffer(1)]], device const half* b_out [[buffer(2)]], device float* output_logits [[buffer(3)]], constant uint batch_size [[buffer(4)]], constant uint sequence_length [[buffer(5)]], constant uint embedding_dim [[buffer(6)]], constant uint vocab_size [[buffer(7)]], uint2 gid [[thread_position_in_grid]])`
+// Applies to: MSL kernel code.
+
+// Rule: Input Tensor (Final Hidden States)
+// Description: Output from the last Add&Norm layer of the final Transformer block (B, S, E). Type `half`.
+// Applies to: MSL kernel code.
+
+// Rule: Output Tensor (Logits)
+// Description: Logits over the vocabulary (B, S, VocabSize). Type `float` is strongly recommended for logits before softmax/loss calculation to maintain precision and stability, even if weights are `half`.
+// Applies to: MSL kernel code, Host C++/Swift buffer allocation.
+
+// Rule: Output Weight Matrix (W_out)
+// Description: Weight matrix for projecting embedding_dim to vocab_size. Dimensions (E x VocabSize).
+// Type `half` is acceptable for weights if memory is a concern, but ensure matmul promotes to `float` for accumulation if possible.
+// Stored in `MTLBuffer` (`MTLStorageModeShared`).
+// Applies to: MSL kernel code, Host C++/Swift weight initialization.
+
+// Rule: Output Bias (b_out)
+// Description: Bias vector of size VocabSize. Type `float` recommended. Stored in `MTLBuffer`.
+// Applies to: MSL kernel code, Host C++/Swift weight initialization.
+
+// Rule: Matrix Multiplication Logic
+// Description: `Logits = FinalHiddenStates @ W_out + b_out`.
+// FinalHiddenStates (B,S,E), W_out (E,V) -> Logits (B,S,V).
+// Optimize matmul. Given vocab_size can be large, this matmul can be substantial.
+// Accumulation for logits should ideally be in `float`.
+// Applies to: MSL kernel code.
+
+// Rule: Data Types
+// Description: Input hidden states `half`. Weights `W_out` can be `half`. Bias `b_out` and output `Logits` should be `float` for numerical stability in subsequent loss calculation / softmax.
+// Applies to: MSL kernel code.
+
+// Rule: Dispatch Grid
+// Description: Depends on matmul strategy. Could be (batch_size * sequence_length, vocab_elements_per_thread_group) or similar, with threadgroups computing tiles of the output logits.
+// Applies to: Host C++/Swift kernel dispatch code.
+
+// Rule: Weight Tying Consideration
+// Description: If weight tying is used (final linear layer weights = input embedding weights), then `W_out` would be a (transposed) view of the embedding matrix. The kernel would take the embedding matrix as input instead of a separate `W_out`.
+// This implies embedding_dim must equal hidden_dim of the transformer blocks.
+// The data type of the tied weights would be that of the embedding matrix (likely `half`). Logit accumulation should still aim for `float`.
+// Applies to: MSL kernel code (if weight tying implemented).
+
+// Rule: Softmax (Separate vs. Fused in Loss)
+// Description: This kernel produces logits. Softmax is typically fused into the cross-entropy loss kernel for training for better numerical stability (LogSoftmax trick).
+// For inference, if probabilities are needed, a separate Softmax kernel would operate on these float logits.
+// Applies to: Architectural decision (training vs. inference pipelines).
+
+// Rule: Gradient Considerations (Forward-looking)
+// Description: Gradients needed for W_out, b_out, and final_hidden_states. The gradient w.r.t. logits comes from the loss function.
+// Applies to: Design consideration for future backward pass.
+
+// Rule: Testing (TDD) - Output Logits Projection Kernel
+// Description:
+//  - Prepare a small batch of input final_hidden_states (e.g., 1 batch x 2 seq_len x 4 emb_dim) with known values.
+//  - Initialize a known output weight matrix W_out (e.g., 4 emb_dim x 10 vocab_size) and bias b_out (size 10 vocab_size).
+//  - Manually (or with Python/NumPy/PyTorch `torch.nn.Linear`) calculate the expected output logits matrix (1 batch x 2 seq_len x 10 vocab_size).
+//  - Execute the MSL output_logits_projection kernel.
+//  - Read back the output_logits buffer from GPU and compare with the expected result (element-wise with tolerance, noting logits are `float`).
+//  - If weight tying is used, ensure the test uses the (transposed) embedding matrix as W_out.
+// Applies to: MSL kernel code, Host C++/Swift test harness.

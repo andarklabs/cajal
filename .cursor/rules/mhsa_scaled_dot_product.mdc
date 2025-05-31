@@ -1,0 +1,82 @@
+---
+description: Cursorrules for MHSA Scaled Dot-Product Attention (rules/mhsa_scaled_dot_product.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for MHSA Scaled Dot-Product Attention (rules/mhsa_scaled_dot_product.mdc)
+
+// Phase: 2 - MSL Kernel Implementation
+// Component: Task 2.3.2 Multi-Head Self-Attention - Scaled Dot-Product Attention
+
+// Rule: Kernel Function Signature
+// Description: Kernel computes attention scores and applies them to V. Inputs: Q, K, V buffers. Output: Context vectors (weighted V).
+// Example: `kernel void scaled_dot_product_attention(device const half* Q [[buffer(0)]], device const half* K [[buffer(1)]], device const half* V [[buffer(2)]], device half* output_context [[buffer(3)]], constant uint batch_size [[buffer(4)]], constant uint num_heads [[buffer(5)]], constant uint sequence_length [[buffer(6)]], constant uint head_dim [[buffer(7)]], constant float scale_factor [[buffer(8)]], /* other params like mask */ uint3 gid [[thread_position_in_grid]])` (gid.x batch, gid.y head, gid.z target_token_idx for scores, or similar structure for matmuls)
+// Applies to: MSL kernel code.
+
+// Rule: Input Buffers Q, K, V
+// Description: Q (B, H, S, D_h), K (B, H, S, D_h or B, H, D_h, S after transpose), V (B, H, S, D_h). Type `half`.
+// K might be pre-transposed to (B, H, D_h, S) for efficient QK^T.
+// Applies to: MSL kernel code.
+
+// Rule: Output Buffer (Context Vectors)
+// Description: Stores the output of the attention mechanism, (B, H, S, D_h). Type `half`.
+// Applies to: MSL kernel code.
+
+// Rule: Step 1 - QK^T (Scaled Key-Query Scores)
+// Description: Compute `AttentionScores = (Q @ K^T) * scale_factor`. `scale_factor = 1.0f / sqrt(head_dim)`.
+// This is a batch matrix multiplication (B x H times S x D_h @ D_h x S -> S x S).
+// Optimize using `simdgroup_matrix` or manual blocking with threadgroup memory.
+// Applies to: MSL kernel code.
+
+// Rule: Step 2 - Causal Masking (Decoder-Specific)
+// Description: For decoder self-attention, apply a causal mask to `AttentionScores` *before* Softmax. Set elements corresponding to future positions to a large negative value (e.g., -FLT_MAX or -HALF_MAX).
+// `if (key_token_idx > query_token_idx) score = -VERY_LARGE_NUMBER;`
+// Applies to: MSL kernel code.
+
+// Rule: Step 3 - Softmax
+// Description: Apply Softmax row-wise (or column-wise depending on QK^T layout, typically row-wise over key positions for each query position) to `AttentionScores` to get `AttentionWeights`.
+// Implement numerically stable Softmax: 1. Find max in row. 2. Subtract max from all elements in row. 3. Exp. 4. Sum exps. 5. Divide exps by sum.
+// Threadgroup reductions can be used for stable softmax (finding max, summing exps).
+// Applies to: MSL kernel code.
+
+// Rule: Step 4 - Weighted Sum (AttentionWeights @ V)
+// Description: Compute `Context = AttentionWeights @ V`.
+// This is a batch matrix multiplication (B x H times S x S @ S x D_h -> S x D_h).
+// Optimize using `simdgroup_matrix` or manual blocking.
+// Applies to: MSL kernel code.
+
+// Rule: Data Layout and Transposition
+// Description: Carefully manage data layouts of Q, K, V for efficient matrix multiplications. K is often transposed `K(B,H,S,D_k) -> K_T(B,H,D_k,S)` before QK^T. The output context vectors should be (B,H,S,D_k).
+// Applies to: MSL kernel code (data access patterns).
+
+// Rule: Data Types
+// Description: Primarily `half` for Q, K, V, context. Intermediate score calculations might use `float` temporarily for Softmax stability before converting back to `half` if needed, or use full `float` path for softmax if `half` precision is insufficient.
+// Applies to: MSL kernel code.
+
+// Rule: Dispatch Grid & Threadgroup Strategy
+// Description: Complex. Could involve multiple kernels or a single highly optimized one (FlashAttention-style).
+// For QK^T: A threadgroup could compute a tile of the S x S attention matrix per head.
+// For Softmax: Threads in a group can cooperate on one row's softmax.
+// For WV: A threadgroup could compute a tile of the S x D_h output context matrix per head.
+// Grid would be (batch_size, num_heads, some_unit_of_work).
+// Applies to: Host C++/Swift kernel dispatch, MSL kernel attributes and logic.
+
+// Rule: FlashAttention-style Kernel (Advanced Optimization)
+// Description: For very long sequences where materializing the S x S attention matrix is a bottleneck, consider implementing a fused kernel (inspired by FlashAttention) that uses tiling, recomputation, and online softmax to avoid storing the full matrix. This is an advanced task.
+// Applies to: Alternative MSL kernel design for high performance.
+
+// Rule: Gradient Considerations (Forward-looking)
+// Description: Backpropagating through scaled dot-product attention is complex, involving gradients for Q, K, V based on the gradient of the context vectors and the intermediate attention weights and scores. This will require several matrix multiplications and careful handling of Softmax derivative.
+// Applies to: Design consideration for future backward pass.
+
+// Rule: Testing (TDD) - Scaled Dot-Product Attention Kernel
+// Description: This is a complex kernel, test sub-parts if possible, then together.
+//  - Prepare small, known Q, K, V matrices (e.g., 1 batch x 1 head x 2 seq_len x 2 head_dim).
+//  - Test QK^T: Manually/NumPy calculate Q @ K^T. Verify GPU output of this part.
+//  - Test Scaling: Apply scale_factor. Verify.
+//  - Test Causal Masking: For a known score matrix, apply causal mask. Verify specific elements are masked (large negative number).
+//  - Test Softmax: For a known (and masked) score matrix row, calculate expected softmax output. Verify GPU softmax implementation (check for numerical stability, sum-to-1 property within tolerance).
+//  - Test WV (Context calc): For known attention weights and V matrix, calculate expected context vectors (Weights @ V). Verify GPU output.
+//  - Overall Test: Run the full kernel with known Q, K, V and verify the final context vector output against a full PyTorch `torch.nn.functional.scaled_dot_product_attention` or manual calculation.
+//  - Test with different sequence lengths and head dimensions.
+// Applies to: MSL kernel code, Host C++/Swift test harness.

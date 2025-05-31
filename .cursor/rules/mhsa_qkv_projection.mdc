@@ -1,0 +1,72 @@
+---
+description: Cursorrules for MHSA QKV Projection (rules/mhsa_qkv_projection.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for MHSA QKV Projection (rules/mhsa_qkv_projection.mdc)
+
+// Phase: 2 - MSL Kernel Implementation
+// Component: Task 2.3.1 Multi-Head Self-Attention - QKV Projection
+
+// Rule: Kernel Function Signature
+// Description: Kernel to project input embeddings to Q, K, V matrices. Input: activated embeddings from previous layer. Output: Q, K, V buffers. Weights for Q, K, V projections are also inputs.
+// Example: `kernel void qkv_projection(device const half* input_embeddings [[buffer(0)]], device const half* Wq [[buffer(1)]], device const half* Wk [[buffer(2)]], device const half* Wv [[buffer(3)]], device half* Q_out [[buffer(4)]], device half* K_out [[buffer(5)]], device half* V_out [[buffer(6)]], constant uint batch_size [[buffer(7)]], constant uint sequence_length [[buffer(8)]], constant uint embedding_dim [[buffer(9)]], constant uint num_heads [[buffer(10)]], constant uint head_dim [[buffer(11)]], /* other params like biases if used */ uint2 gid [[thread_position_in_grid]])`
+// Applies to: MSL kernel code.
+
+// Rule: Input Embeddings
+// Description: Buffer containing embeddings (e.g., after positional encoding), typically (batch_size x sequence_length x embedding_dim) of type `half` or `float`.
+// Applies to: MSL kernel code.
+
+// Rule: Weight Matrices (Wq, Wk, Wv)
+// Description: Separate weight matrices for Q, K, V projections. Each is typically (embedding_dim x (num_heads * head_dim)). Note: num_heads * head_dim often equals embedding_dim. Stored in `MTLBuffer` (MTLStorageModeShared), type `half`.
+// Applies to: MSL kernel code, Host C++/Swift weight initialization.
+
+// Rule: Output Buffers (Q, K, V)
+// Description: Separate output buffers for Q, K, V. Dimensions: (batch_size x num_heads x sequence_length x head_dim). Data type `half`.
+The layout (e.g., B,H,S,D vs B,S,H,D) needs careful consideration for subsequent matmuls.
+// Applies to: MSL kernel code, Host C++/Swift buffer allocation.
+
+// Rule: Matrix Multiplication Logic
+// Description: Perform matrix multiplication: `Input @ Wq -> Q_raw`, `Input @ Wk -> K_raw`, `Input @ Wv -> V_raw`. These raw outputs are (batch_size x sequence_length x (num_heads * head_dim)).
+// Optimization: Exploit `simdgroup_matrix` or `threadgroup_matrix` if suitable, or implement efficient blocked matrix multiplication using threadgroup memory.
+// Applies to: MSL kernel code.
+
+// Rule: Reshaping/Transposing for Heads
+// Description: After projection, the raw Q, K, V (batch_size x sequence_length x total_head_dims) need to be reshaped (and possibly transposed) to (batch_size x num_heads x sequence_length x head_dim) to separate the heads for the attention calculation. This can be part of the projection kernel or a separate small kernel.
+// Example desired layout for Q: (batch, num_heads, seq_len, head_dim)
+// Example desired layout for K: (batch, num_heads, head_dim, seq_len) for QK^T
+// Example desired layout for V: (batch, num_heads, seq_len, head_dim)
+// Applies to: MSL kernel code.
+
+// Rule: Data Types
+// Description: Primarily use `half` for inputs, weights, and outputs to maximize M3 Max performance. Biases, if used, should also be `half`.
+// Applies to: MSL kernel code.
+
+// Rule: Dispatch Grid
+// Description: The dispatch grid depends on the matmul strategy. If each thread computes one output element: (batch_size * sequence_length * num_heads * head_dim). If using matrix primitives, the grid structure is dictated by those primitives.
+// A common approach is for each thread or threadgroup to compute a portion of the output Q, K, V matrices.
+// Applies to: Host C++/Swift kernel dispatch code.
+
+// Rule: Fused QKV Projection (Alternative)
+// Description: As noted in plan.md, consider fusing Wq, Wk, Wv into a single weight matrix W_qkv (embedding_dim x (3 * num_heads * head_dim)). Perform one matmul: `Input @ W_qkv` then split the result. This can improve arithmetic intensity.
+// Applies to: Alternative MSL kernel design and weight structure.
+
+// Rule: Biases
+// Description: Decide whether to include bias terms in the Q, K, V projections. If yes, they need to be added after the matrix multiplication. Store biases in `MTLBuffer`s (`half`).
+// Applies to: MSL kernel code, Host C++/Swift weight initialization.
+
+// Rule: Gradient Considerations (Forward-looking)
+// Description: For backpropagation, gradients need to be calculated for Wq, Wk, Wv, biases (if any), and the input_embeddings. This involves matrix multiplications with gradients from the subsequent attention calculation.
+// Applies to: Design consideration for future backward pass.
+
+// Rule: Testing (TDD) - QKV Projection Kernel
+// Description:
+//  - Prepare a small batch of input embeddings (e.g., 1 batch x 2 seq x 4 emb_dim).
+//  - Initialize small, known weight matrices Wq, Wk, Wv (e.g., 4x4 if emb_dim=head_dim*num_heads and num_heads=1, or 4x(2*2) if num_heads=2, head_dim=2).
+//  - Manually (or with Python/NumPy using `torch.nn.Linear` or equivalent) calculate the expected Q, K, V matrices after projection and reshaping/transposing for heads.
+//  - Execute the MSL qkv_projection kernel.
+//  - Read back Q, K, V buffers from GPU and compare with expected outputs (element-wise with tolerance).
+//  - Test correct handling of batching, sequence length, and head dimensions.
+//  - If fused QKV is used, adapt tests for the combined weight matrix and subsequent splitting.
+//  - Test with and without biases if applicable.
+// Applies to: MSL kernel code, Host C++/Swift test harness.

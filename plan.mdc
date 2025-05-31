@@ -1,0 +1,109 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+// General MSL Transformer Project Cursorrules (plan.mdc)
+
+// Phase: All
+// Goal: Ensure high-quality, optimized, and maintainable MSL and host code.
+
+// Rule: M3 Max Optimization - Unified Memory
+// Description: Prioritize MTLStorageModeShared for buffers to leverage unified memory on M3 Max, minimizing explicit data transfers between CPU and GPU.
+// Applies to: MSL buffer allocation, Host C++/Swift code.
+
+// Rule: M3 Max Optimization - Data Types
+// Description: Use `half` (16-bit float) for weights, activations, and intermediate computations where precision allows, to improve performance and reduce memory footprint. Fall back to `float` (32-bit float) for precision-sensitive calculations (e.g., loss accumulation, parts of softmax, some normalization parameters).
+// Applies to: MSL kernel code, Host C++/Swift data structures.
+
+// Rule: MSL Best Practice - Kernel Clarity and Readability
+// Description: Write clean, well-commented MSL. Use meaningful variable names. Structure complex kernels logically.
+// Applies to: MSL kernel code.
+
+// Rule: MSL Best Practice - Modularity
+// Description: Design MSL kernels and host code components to be modular and reusable. Avoid monolithic kernels where possible; break down complex operations into smaller, testable units.
+// Applies to: MSL kernel design, Host C++/Swift code structure.
+
+// Rule: MSL Best Practice - Error Handling
+// Description: Implement robust error checking for all Metal API calls in the host code (C++/Swift). Check for errors when creating pipelines, buffers, and encoding commands.
+// Applies to: Host C++/Swift code.
+
+// Rule: MSL Best Practice - Parameterization
+// Description: Make model hyperparameters (hidden size, number of heads, number of layers, vocabulary size, sequence length, learning rate, etc.) easily configurable from the host code or a configuration file.
+// Applies to: Host C++/Swift code, MSL kernel constants if necessary (though prefer host-side configuration).
+
+// Rule: MSL Best Practice - Threadgroup Sizing
+// Description: Carefully choose and experiment with threadgroup sizes (`threads_per_threadgroup`) for each kernel to find optimal performance. This depends on register usage, shared memory requirements, and the nature of the computation. Profile different sizes.
+// Applies to: MSL kernel [[attribute]] declarations.
+
+// Rule: MSL Best Practice - SIMD-Group Operations
+// Description: Where appropriate (e.g., reductions, matrix operations on compatible hardware/Metal versions), explore and utilize SIMD-group functions (`simd_sum`, `simd_shuffle`, `simdgroup_matrix_multiply`, etc.) for better hardware utilization.
+// Applies to: MSL kernel code.
+
+// Rule: MSL Best Practice - Argument Buffers
+// Description: For kernels with many buffer, texture, or sampler arguments, consider using Metal Argument Buffers (`[[attribute(buffer)]]` with a struct) to simplify kernel dispatch and potentially improve performance by reducing argument passing overhead. Especially useful for organizing weights for different layers/components within a single kernel or related set of kernels.
+// Applies to: MSL kernel signatures, Host C++/Swift code for setting up argument encoders.
+
+// Rule: MSL Best Practice - Asynchronous Operations
+// Description: Use command buffer completion handlers and parallel command encoders where appropriate to overlap CPU and GPU work (e.g., data loading/preprocessing on CPU while GPU computes).
+// Applies to: Host C++/Swift Metal API usage.
+
+// Rule: MSL Best Practice - Resource Management
+// Description: Properly release all Metal objects (`MTLBuffer`, `MTLTexture`, `MTLComputePipelineState`, `MTLLibrary`, `MTLFunction`, `MTLEvent`, `MTLFence`, etc.) when they are no longer needed to prevent memory leaks. Use ARC in Swift or manual management in C++ (e.g., smart pointers or explicit release calls).
+// Applies to: Host C++/Swift code.
+
+// Rule: Debugging - Metal Debugging Tools
+// Description: Regularly use Metal Frame Capture (Shader Debugger, Dependency Viewer) and Metal System Trace in Xcode for debugging logic errors, performance profiling, and analyzing GPU state.
+// Applies to: Development workflow.
+
+// Rule: Development - Incremental Development and Testing
+// Description: Implement and test each component (embedding, attention, FFN, loss, gradients, optimizer steps) individually before integrating them. For MSL kernels, write small test harnesses or compare outputs with CPU-based reference implementations for simple inputs.
+// Applies to: Development workflow.
+
+// Rule: Development - Test-Driven Development (TDD) Focus
+// Description: Adhere to Test-Driven Development principles. Before implementing a new function, MSL kernel, or module, write unit tests that define its expected behavior and outputs for given inputs. Ensure tests pass before and after implementation. MSL kernel tests should compare GPU output against CPU reference calculations for known inputs.
+// Applies to: Entire development workflow, MSL kernel development, Host C++/Swift code development.
+
+// Rule: Numerical Stability
+// Description: Be mindful of potential numerical issues, especially when using `half` precision. Implement stable Softmax, use epsilon in LayerNorm/RMSNorm and division operations. Monitor for NaNs/Infs during training.
+// Applies to: MSL kernel code, loss calculations.
+
+// Rule: Code Comments - MSL Specifics
+// Description: In MSL, clearly comment on memory access patterns, threadgroup synchronization points (if any), data types used, and the purpose of complex calculations or SIMD-group operations.
+// Applies to: MSL kernel code.
+
+// Rule: Code Comments - Host Code Specifics
+// Description: In host code (C++/Swift), comment on the setup of Metal objects, kernel dispatch logic, data flow between CPU and GPU, and management of asynchronous operations.
+// Applies to: Host C++/Swift code.
+
+// Rule: Host Language Choice (Project Default: C++)
+// Description: Unless a compelling reason arises for a specific module, host code will be developed in C++. If Swift is chosen for a part, ensure clear interop or separation.
+// Applies to: Host code development.
+
+// Rule: Build System (Project Default: CMake)
+// Description: Use CMake for building the C++ host application and managing MSL compilation.
+// Applies to: Project setup.
+
+// Rule: Version Control
+// Description: All code and documentation (including these .mdc files and plan.md) will be version controlled using Git. Commit frequently with clear messages.
+// Applies to: Entire project.
+
+// Rule: Data Management - BookCorpus
+// Description: Ensure efficient loading and processing of the BookCorpus dataset. Preprocessed data should be stored in a format optimized for quick loading into Metal buffers.
+// Applies to: Data preprocessing scripts, Host code.
+
+// Rule: Metal Shading Language Standard
+// Description: Target a specific MSL version compatible with M3 Max (e.g., MSL 3.0 or higher, check latest Xcode docs) and use features available in that version. Specify the MSL version in shader compilation options.
+// Applies to: MSL kernel code, Build system (compiler flags).
+
+// Rule: Transformer Architecture - Decoder-Only Focus
+// Description: Initial development will focus on a decoder-only Transformer architecture. All component designs should align with this. Deviations require explicit discussion and plan update.
+// Applies to: MSL kernel design, Model architecture in host code.
+
+// Rule: Memory Budget Adherence
+// Description: Continuously monitor estimated and actual memory usage (weights, activations, gradients, KV cache) against the 36GB unified memory limit of the M3 Max. Design choices should prioritize staying within this budget.
+// Applies to: Model architecture, Batch size selection, MSL kernel design.
+
+// Rule: Grab cursor rules
+// Description: Before each new task (according to the plan), grab and look at it's corresponding .cursor/rules/ file
+// Applies to: Everything

@@ -1,0 +1,72 @@
+---
+description: Cursorrules for Loss Calculation (.cursor/rules/loss_calculation.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for Loss Calculation (.cursor/rules/loss_calculation.mdc)
+
+// Phase: 3 - Model Assembly & Training Orchestration
+// Component: Task 3.3 Training Loop (Specifically Loss Calculation part)
+
+// Rule: Loss Function - Cross-Entropy
+// Description: Implement Cross-Entropy Loss for language modeling. The MSL kernel will take logits and target token IDs as input and compute the loss.
+// For numerical stability, this is often implemented as LogSoftmax followed by Negative Log Likelihood (NLLLoss).
+// `Loss = -sum(target_one_hot * log_softmax(logits))` which simplifies to `-log_softmax_logits[target_id]` for each token.
+// Applies to: MSL kernel code.
+
+// Rule: Kernel Function Signature (Cross-Entropy Loss)
+// Description: Inputs: Logits (B, S, V), Target token IDs (B, S). Output: Scalar loss per token (or sum/mean loss in a buffer).
+// Example: `kernel void cross_entropy_loss(device const float* logits [[buffer(0)]], device const uint* target_ids [[buffer(1)]], device float* per_token_loss [[buffer(2)]], constant uint batch_size [[buffer(3)]], constant uint sequence_length [[buffer(4)]], constant uint vocab_size [[buffer(5)]], constant uint pad_token_id [[buffer(6)]], uint2 gid [[thread_position_in_grid]])` (gid.x for batch_idx, gid.y for seq_idx)
+// Applies to: MSL kernel code.
+
+// Rule: Input Logits
+// Description: Logits from the final output layer of the model (B, S, V). Recommended type `float` for stability.
+// Applies to: MSL kernel code.
+
+// Rule: Target Token IDs
+// Description: Ground truth token IDs (B, S). Type `uint`.
+// Applies to: MSL kernel code.
+
+// Rule: Output Loss Buffer
+// Description: Can be a buffer storing per-token loss (B, S) or a single-element buffer storing the sum/mean loss over the batch. If per-token loss, a subsequent reduction kernel (or CPU reduction) is needed to get the final batch loss.
+// Using `float` for loss values.
+// Applies to: MSL kernel code.
+
+// Rule: LogSoftmax Implementation (Numerically Stable)
+// Description: Inside the kernel, for each token's logit vector (size V):
+//  1. Find max_logit in the vector.
+//  2. Compute `log_sum_exp = max_logit + log(sum(exp(logits[i] - max_logit)))`.
+//  3. `log_softmax_logit = logit - log_sum_exp`.
+// This should be done carefully using `float` precision.
+// Applies to: MSL kernel code.
+
+// Rule: NLLLoss Part
+// Description: After computing `log_softmax_logits` for a token, the loss for that token is `-log_softmax_logits[target_id_for_token]`.
+// Applies to: MSL kernel code.
+
+// Rule: Ignoring PAD Tokens
+// Description: The loss calculation must ignore contributions from `[PAD]` tokens in the target sequence. If `target_ids[i] == pad_token_id`, the loss for that position should be zero.
+// This `pad_token_id` should be passed to the kernel.
+// Applies to: MSL kernel code.
+
+// Rule: Loss Reduction (Mean vs. Sum)
+// Description: Decide whether the final reported loss is the sum of losses over non-pad tokens or the mean. Mean is more common. If the kernel outputs per-token loss, a reduction step (GPU or CPU) is needed.
+// If mean, divide sum of losses by the count of non-pad tokens.
+// Applies to: MSL kernel code (if reduction is internal) or Host C++ code (if reduction is external).
+
+// Rule: Gradient of Loss w.r.t. Logits (for Backward Pass)
+// Description: The derivative of CrossEntropyLoss w.r.t. logits `z_i` is `softmax(z)_i - y_i` (where `y_i` is 1 if `i` is the target class, 0 otherwise).
+// This gradient (`softmax(logits) - target_one_hot`) is the starting point for the backward pass. It should be computed by a kernel (can be part of the loss kernel or a separate one).
+// Applies to: MSL kernel code (design for backward pass).
+
+// Rule: Testing (TDD) - Loss Calculation Kernel
+// Description:
+//  - Prepare a small batch of input logits (e.g., 1 batch x 2 seq_len x 4 vocab_size) with known `float` values.
+//  - Prepare corresponding target token IDs (e.g., 1 batch x 2 seq_len), including some `[PAD]` tokens.
+//  - Manually (or with Python/PyTorch `torch.nn.CrossEntropyLoss` with `ignore_index` for PAD) calculate the expected per-token losses and the final batch loss (mean over non-pad tokens).
+//  - Execute the MSL cross_entropy_loss kernel.
+//  - Read back the output loss buffer(s) from GPU and compare with expected values (with tolerance for `float`).
+//  - Test edge cases: all targets are PAD, no targets are PAD, different vocab sizes.
+//  - Separately test the LogSoftmax part of the kernel with known inputs.
+//  - Test the gradient calculation (`softmax(logits) - target_one_hot`) with known logits and targets, comparing against a reference.
+// Applies to: MSL kernel code, Host C++/Swift test harness.

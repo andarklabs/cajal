@@ -4,6 +4,9 @@ practice.cpp
 citadel
 citadel.cpp
 .vscode/
+data/
+.cursorignore
+old_work/
 
 # Prerequisites
 *.d

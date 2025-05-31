@@ -1,0 +1,83 @@
+---
+description: Cursorrules for Add & Norm (Layer Normalization) (rules/add_norm_layernorm.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for Add & Norm (Layer Normalization) (rules/add_norm_layernorm.mdc)
+
+// Phase: 2 - MSL Kernel Implementation
+// Component: Task 2.4 Add & Norm (Layer Normalization)
+
+// Rule: Kernel Function Signature
+// Description: Kernel for Layer Normalization. Inputs: Input tensor from previous sublayer (e.g., MHSA or FFN), residual input tensor (input to the sublayer). Output: Normalized tensor. Learnable parameters gamma and beta.
+// Example: `kernel void layer_norm(device const half* input_tensor [[buffer(0)]], device const half* residual_input [[buffer(1)]], device half* output_tensor [[buffer(2)]], device const half* gamma [[buffer(3)]], device const half* beta [[buffer(4)]], constant uint batch_size [[buffer(5)]], constant uint sequence_length [[buffer(6)]], constant uint embedding_dim [[buffer(7)]], constant float epsilon [[buffer(8)]], uint2 gid [[thread_position_in_grid]])` (gid.x batch*seq_len, gid.y for part of embedding_dim if not fully unrolled)
+// Applies to: MSL kernel code.
+
+// Rule: Input Tensors
+// Description: `input_tensor` (B, S, E) is the output of the sublayer (MHSA/FFN). `residual_input` (B, S, E) is the input to that sublayer. Both `half`.
+// Applies to: MSL kernel code.
+
+// Rule: Output Tensor
+// Description: `output_tensor` (B, S, E) after `LayerNorm(input_tensor + residual_input)`. Type `half`.
+// Applies to: MSL kernel code.
+
+// Rule: Learnable Parameters (gamma, beta)
+// Description: `gamma` and `beta` are vectors of size `embedding_dim`. Stored in `MTLBuffer` (MTLStorageModeShared), type `half` or `float` (often `float` for stability of scale/shift).
+// Applies to: MSL kernel code, Host C++/Swift weight initialization.
+
+// Rule: Epsilon
+// Description: Small float constant (e.g., `1e-5` or `1e-6`) to prevent division by zero in variance calculation. Passed as a constant buffer or direct value.
+// Applies to: MSL kernel code.
+
+// Rule: LayerNorm Logic
+// Description: For each instance (vector of size `embedding_dim` at each batch/sequence position):
+//  1. Add residual: `x = input_tensor_instance + residual_input_instance`.
+//  2. Calculate mean of `x` across `embedding_dim`.
+//  3. Calculate variance of `x` across `embedding_dim`.
+//  4. Normalize: `norm_x = (x - mean) / sqrt(variance + epsilon)`.
+//  5. Scale and shift: `output_instance = gamma * norm_x + beta`.
+// Applies to: MSL kernel code.
+
+// Rule: Mean and Variance Calculation
+// Description: These are reductions over the `embedding_dim`. Use threadgroup shared memory (`threadgroup half[]`) and threadgroup SIMD operations (`simd_sum`, etc.) or atomic operations if multiple threads/threadgroups contribute to a single instance's norm stats (less common for LayerNorm, more for BatchNorm).
+// Typically, a threadgroup is assigned per instance (per token) to calculate its mean/variance.
+// Precision: Mean/variance calculations might benefit from `float` intermediate precision before converting back, especially if `embedding_dim` is large.
+// Applies to: MSL kernel code.
+
+// Rule: Data Types
+// Description: Inputs/Outputs `half`. Gamma/Beta often `float` for stability but can be `half`. Epsilon `float`. Intermediate mean/variance calculations might use `float`.
+// Applies to: MSL kernel code.
+
+// Rule: Dispatch Grid
+// Description: Typically a 2D grid (batch_size * sequence_length, 1), where each threadgroup (or even a single powerful thread) processes one full `embedding_dim` vector (one token instance).
+// The threads within the group cooperate to calculate mean/variance for that instance.
+// Applies to: Host C++/Swift kernel dispatch code.
+
+// Rule: RMSNorm (Alternative)
+// Description: If RMSNorm is chosen: `x_rms = x / sqrt(mean(x*x) + epsilon); output = gamma * x_rms;` (beta is often omitted or can be kept).
+// Simpler calculation: no mean subtraction. Requires calculating mean of squares.
+// Applies to: Alternative MSL kernel logic.
+
+// Rule: Pre-LN vs Post-LN (Architectural Choice)
+// Description: This rule set assumes Post-LN: `output = LayerNorm(sublayer_output + residual_input)`. If Pre-LN `output = residual_input + sublayer_output(LayerNorm(residual_input))` is used, the kernel inputs and structure change accordingly. The LayerNorm kernel itself remains similar but is applied *before* the sublayer.
+// Applies to: Model architecture and kernel invocation order.
+
+// Rule: Gradient Considerations (Forward-looking)
+// Description: Backpropagation through LayerNorm is non-trivial, involving derivatives of mean, variance, sqrt, and the scaling/shifting. Gradients are needed for gamma, beta, and the input `x`.
+// Applies to: Design consideration for future backward pass.
+
+// Rule: Testing (TDD) - Layer Normalization Kernel
+// Description:
+//  - Prepare a small batch of input tensors (sublayer output and residual input, e.g., 1 batch x 2 seq_len x 4 emb_dim) with known values.
+//  - Initialize known gamma (e.g., all ones) and beta (e.g., all zeros) vectors (size 4 emb_dim).
+//  - Set a known epsilon value.
+//  - Manually (or with Python/NumPy/PyTorch `torch.nn.LayerNorm`) calculate:
+//    1. The sum: `x = input_tensor + residual_input`.
+//    2. Mean and variance of `x` for each instance (across embedding_dim).
+//    3. The normalized output `(x - mean) / sqrt(variance + epsilon)`.
+//    4. The final scaled and shifted output `gamma * norm_x + beta`.
+//  - Execute the MSL layer_norm kernel.
+//  - Read back the output buffer from GPU and compare with the expected result (element-wise with tolerance).
+//  - Test with different input values to check mean/variance calculations, including cases with zero variance (if epsilon handles it correctly).
+//  - If RMSNorm is used, adapt tests for its specific formula.
+// Applies to: MSL kernel code, Host C++/Swift test harness.

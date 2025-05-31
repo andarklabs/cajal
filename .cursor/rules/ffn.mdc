@@ -1,0 +1,82 @@
+---
+description: Cursorrules for Feed-Forward Network (FFN) (rules/ffn.mdc)
+globs: 
+alwaysApply: false
+---
+// Cursorrules for Feed-Forward Network (FFN) (rules/ffn.mdc)
+
+// Phase: 2 - MSL Kernel Implementation
+// Component: Task 2.5 Feed-Forward Network (FFN)
+
+// Rule: Kernel Structure - Two Linear Layers + Activation
+// Description: FFN typically consists of: Linear1 (upscale) -> Activation (e.g., GELU) -> Linear2 (downscale).
+// This can be one fused kernel or multiple kernels (e.g., MatMul -> Activation -> MatMul).
+// A fused kernel can be more efficient by keeping intermediate results in registers/threadgroup memory.
+// Applies to: MSL kernel design.
+
+// Rule: Kernel Function Signature (Example for a fused FFN)
+// Description: Inputs: Output from Add&Norm. Outputs: FFN output. Weights and biases for two linear layers.
+// Example: `kernel void feed_forward_network(device const half* input_norm [[buffer(0)]], device const half* W1 [[buffer(1)]], device const half* b1 [[buffer(2)]], device const half* W2 [[buffer(3)]], device const half* b2 [[buffer(4)]], device half* ffn_output [[buffer(5)]], constant uint batch_size [[buffer(6)]], constant uint sequence_length [[buffer(7)]], constant uint embedding_dim [[buffer(8)]], constant uint ffn_hidden_dim [[buffer(9)]], /* other params */ uint2 gid [[thread_position_in_grid]])`
+// Applies to: MSL kernel code.
+
+// Rule: Input Tensor
+// Description: Input is the output from the preceding LayerNorm layer (B, S, E), type `half`.
+// Applies to: MSL kernel code.
+
+// Rule: Output Tensor
+// Description: Output of the FFN (B, S, E), type `half`. This goes into the next Add&Norm.
+// Applies to: MSL kernel code.
+
+// Rule: Weights and Biases
+// Description: W1 (E x FFN_Hidden_Dim), b1 (FFN_Hidden_Dim), W2 (FFN_Hidden_Dim x E), b2 (E).
+// FFN_Hidden_Dim is typically 4 * E. Stored in `MTLBuffer`s (`MTLStorageModeShared`), type `half`.
+// Applies to: MSL kernel code, Host C++/Swift weight initialization.
+
+// Rule: Linear Layer 1 (Upscale)
+// Description: `Hidden = Activation(Input @ W1 + b1)`.
+// Matrix multiplication followed by bias addition, then activation function.
+// Optimize matmul using `simdgroup_matrix` or manual blocking.
+// Applies to: MSL kernel code.
+
+// Rule: Activation Function - GELU Default
+// Description: Implement GELU (Gaussian Error Linear Unit). A common approximation is `0.5 * x * (1 + tanh(sqrt(2/PI) * (x + 0.044715 * x^3)))`.
+// Can be implemented efficiently in MSL. Other options: ReLU, SwiGLU (see plan.md).
+// Applies to: MSL kernel code.
+
+// Rule: Linear Layer 2 (Downscale)
+// Description: `Output = Hidden_Activated @ W2 + b2`.
+// Matrix multiplication followed by bias addition.
+// Applies to: MSL kernel code.
+
+// Rule: Data Types
+// Description: All inputs, outputs, weights, biases primarily `half`.
+// Activation function intermediates might use `float` for precision if GELU approximation is sensitive, then convert back to `half`.
+// Applies to: MSL kernel code.
+
+// Rule: Dispatch Grid
+// Description: Similar to other linear layers. Depends on matmul strategy. For a fused kernel, a threadgroup might process one token (instance of size E) through the entire FFN.
+// Grid: (batch_size * sequence_length, 1) if threadgroups handle full vectors.
+// Applies to: Host C++/Swift kernel dispatch code.
+
+// Rule: SwiGLU/GEGLU (Alternative Activation)
+// Description: If SwiGLU/GEGLU is chosen: `FFN(x, W, V, W2) = (Activation(xW) * xV)W2`.
+// W and V are separate weight matrices for the first stage. Increases parameters and complexity but can improve quality. Requires changes to W1, b1 (now W, V, possibly b_w, b_v) and kernel logic.
+// Applies to: Alternative MSL kernel design.
+
+// Rule: Gradient Considerations (Forward-looking)
+// Description: Gradients needed for W1, b1, W2, b2, and the input to FFN. Involves matmuls and derivative of activation function.
+// Applies to: Design consideration for future backward pass.
+
+// Rule: Testing (TDD) - Feed-Forward Network (FFN) Kernel
+// Description:
+//  - Prepare a small batch of input tensors (output from LayerNorm, e.g., 1 batch x 2 seq_len x 4 emb_dim) with known values.
+//  - Initialize known weight matrices W1, W2 and biases b1, b2 (e.g., W1: 4x8, b1: 8, W2: 8x4, b2: 4 for ffn_hidden_dim=8).
+//  - Manually (or with Python/NumPy/PyTorch `torch.nn.Linear` and GELU activation) calculate:
+//    1. Output of first linear layer: `h = Input @ W1 + b1`.
+//    2. Output of activation: `h_act = GELU(h)`.
+//    3. Output of second linear layer: `Output = h_act @ W2 + b2`.
+//  - Execute the MSL feed_forward_network kernel (or sequence of kernels if not fused).
+//  - Read back the final FFN output buffer from GPU and compare with the expected result (element-wise with tolerance).
+//  - Test the GELU activation implementation specifically with known inputs and outputs.
+//  - If SwiGLU or other activations are used, adapt tests accordingly.
+// Applies to: MSL kernel code, Host C++/Swift test harness.
