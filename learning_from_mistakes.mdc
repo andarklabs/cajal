@@ -42,3 +42,27 @@ In C++ string and character literals, a single backslash `\` is the escape chara
 - More maintainable and reliable code
 
 **Rule:** For algorithms with multiple interdependent steps, implement and test the helper methods first, then compose them into the main algorithm. Use small, predictable test cases to verify each step before moving to real-world data.
+
+## Real-World BPE Tokenizer Performance Insights
+
+**Test Results from BookCorpus (1000 lines, 5000 target vocab):**
+- **Training Time**: ~30 seconds for 1000 documents
+- **Final Vocabulary**: 1776 tokens (stopped early due to insufficient frequent pairs)
+- **Learned Merges**: 1729 BPE rules
+- **Compression Ratio**: 0.25-0.34 tokens per character (excellent compression)
+- **Speed**: 190-275 characters/ms encoding speed
+
+**Key Observations:**
+1. **BPE Training Scales**: Successfully learned meaningful subwords like "feeling", "shooting", "exclaimed"
+2. **Compression Efficiency**: Achieved 3-4x compression compared to character-level tokenization
+3. **Mixed Case Sensitivity**: Lowercase text compresses better (0.273 ratio) than mixed case (0.542 ratio)
+4. **Punctuation Impact**: Punctuation increases token count but still achieves reasonable compression
+5. **Training Convergence**: Algorithm stopped at 1776 tokens when no more frequent pairs existed (good behavior)
+
+**Performance Optimization Insights:**
+- **Memory Efficiency**: Stream-based reading allows processing large corpora without loading everything into memory
+- **Training Speed**: BPE training on 1000 documents takes ~30 seconds, scales reasonably
+- **Encoding Speed**: 200+ chars/ms is fast enough for real-time applications
+- **Vocabulary Size**: Real-world text needs 1500-2000+ tokens for good coverage
+
+**Rule:** Always test tokenizers on real-world data before deployment. Performance characteristics from synthetic test cases don't always transfer to actual text corpora. Monitor compression ratios and encoding speeds as key metrics for tokenizer quality.

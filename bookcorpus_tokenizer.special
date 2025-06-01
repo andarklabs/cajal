@@ -1,0 +1,5 @@
+unk_token	[UNK]	0
+pad_token	[PAD]	1
+bos_token	[BOS]	2
+eos_token	[EOS]	3
+next_token_id	1776
