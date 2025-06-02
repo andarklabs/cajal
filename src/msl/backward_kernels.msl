@@ -1,0 +1,831 @@
+#include <metal_stdlib>
+using namespace metal;
+
+// Backward pass for Layer Normalization
+// Given grad_output (dL/dy_norm), input_plus_residual (x from forward pass),
+// gamma, and normalized_x_component = (x - mean) / sqrt(variance + eps)
+// Computes: dL/dgamma, dL/dbeta, dL/dx (gradient of loss w.r.t. input_plus_residual)
+kernel void layer_norm_backward(
+    device const half* grad_output_norm [[buffer(0)]],       // dL/dy_L (B, S, E)
+    device const half* input_plus_residual [[buffer(1)]],    // x = input_sublayer + residual (B, S, E) (saved from forward)
+    device const half* gamma [[buffer(2)]],                  // gamma weights (E)
+    device const float* mean_per_instance [[buffer(3)]],      // mean of x for each instance (B, S)
+    device const float* rsqrt_variance_per_instance [[buffer(4)]], // 1/sqrt(variance + eps) for each instance (B, S)
+    
+    device atomic_float* grad_gamma [[buffer(5)]],                 // dL/dgamma (E) (atomic accumulation)
+    device atomic_float* grad_beta [[buffer(6)]],                  // dL/dbeta (E) (atomic accumulation)
+    device half* grad_input_plus_residual [[buffer(7)]],    // dL/dx (B, S, E)
+    
+    constant uint& batch_size [[buffer(8)]],
+    constant uint& seq_len [[buffer(9)]],
+    constant uint& embedding_dim [[buffer(10)]],
+    uint instance_idx [[threadgroup_position_in_grid]], // One threadgroup per instance (token)
+    uint dim_idx [[thread_position_in_threadgroup]]    // Thread index within the group (0 to embedding_dim-1)
+) {
+    if (instance_idx >= batch_size * seq_len) return;
+
+    // Use regular threadgroup arrays for manual reduction
+    threadgroup float tg_sum_dL_dnorm_x[1024]; // Assuming embedding_dim <= 1024
+    threadgroup float tg_sum_dL_dnorm_x_mul_x_centered[1024];
+
+    uint base_offset = instance_idx * embedding_dim;
+    float x_i = float(input_plus_residual[base_offset + dim_idx]);
+    float grad_output_norm_i = float(grad_output_norm[base_offset + dim_idx]);
+    float gamma_i = float(gamma[dim_idx]);
+    float mean_i = mean_per_instance[instance_idx];
+    float rsqrt_var_i = rsqrt_variance_per_instance[instance_idx];
+
+    // Accumulate dL/dbeta and dL/dgamma (these are device atomics, should be fine)
+    atomic_fetch_add_explicit(&grad_beta[dim_idx], grad_output_norm_i, memory_order_relaxed);
+    float x_centered_norm_i = (x_i - mean_i) * rsqrt_var_i;
+    atomic_fetch_add_explicit(&grad_gamma[dim_idx], grad_output_norm_i * x_centered_norm_i, memory_order_relaxed);
+
+    float dL_dnorm_x_i = grad_output_norm_i * gamma_i;
+
+    // Store partial sums in threadgroup memory
+    tg_sum_dL_dnorm_x[dim_idx] = dL_dnorm_x_i;
+    tg_sum_dL_dnorm_x_mul_x_centered[dim_idx] = dL_dnorm_x_i * (x_i - mean_i);
+    
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    // Manual reduction in threadgroup memory
+    for (uint s = embedding_dim / 2; s > 0; s >>= 1) {
+        if (dim_idx < s) {
+            tg_sum_dL_dnorm_x[dim_idx] += tg_sum_dL_dnorm_x[dim_idx + s];
+            tg_sum_dL_dnorm_x_mul_x_centered[dim_idx] += tg_sum_dL_dnorm_x_mul_x_centered[dim_idx + s];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+
+    // Final sums are in index 0 of the threadgroup arrays
+    float final_sum_dL_dnorm_x = tg_sum_dL_dnorm_x[0];
+    float final_sum_dL_dnorm_x_mul_x_centered = tg_sum_dL_dnorm_x_mul_x_centered[0];
+
+    float dL_dx_i = rsqrt_var_i * (
+                        dL_dnorm_x_i - 
+                        (final_sum_dL_dnorm_x_mul_x_centered * (x_i - mean_i) * rsqrt_var_i * rsqrt_var_i + final_sum_dL_dnorm_x) / float(embedding_dim)
+                    );
+
+    grad_input_plus_residual[base_offset + dim_idx] = half(dL_dx_i);
+}
+
+// Backward pass for Output Logits Projection
+// Y = XW + b  =>  dL/dX = dL/dY @ W^T, dL/dW = X^T @ dL/dY, dL/db = sum(dL/dY)
+kernel void output_projection_backward(
+    device const float* grad_logits [[buffer(0)]],            // dL/dY (B, S, V)
+    device const half* final_hidden_states [[buffer(1)]],   // X (B, S, E) (input to this layer from forward)
+    device const half* W_out [[buffer(2)]],                  // W (E, V)
+    
+    device atomic_float* grad_W_out [[buffer(3)]],                 // dL/dW (E, V) (atomic accumulation or per-thread write if zeroed)
+    device atomic_float* grad_b_out [[buffer(4)]],                 // dL/db (V) (atomic accumulation or per-thread write)
+    device half* grad_final_hidden_states [[buffer(5)]],    // dL/dX (B, S, E)
+    
+    constant uint& batch_size [[buffer(6)]],
+    constant uint& seq_len [[buffer(7)]],
+    constant uint& embedding_dim [[buffer(8)]],
+    constant uint& vocab_size [[buffer(9)]],
+    uint3 gid [[thread_position_in_grid]] // gid.x for batch*seq_idx, gid.y for embedding_dim_idx, gid.z for vocab_idx (flexible)
+) {
+    uint instance_idx = gid.x; // instance = batch_idx * sequence_length + seq_idx
+    uint e_idx = gid.y;        // for dL/dX and dL/dW (row)
+    uint v_idx = gid.z;        // for dL/db and dL/dW (col)
+
+    if (instance_idx >= batch_size * seq_len) return; // Should be instance_idx check primarily
+
+    if (e_idx == 0 && v_idx < vocab_size) { // Ensure v_idx is within bounds for grad_b_out
+        atomic_fetch_add_explicit(&grad_b_out[v_idx], grad_logits[instance_idx * vocab_size + v_idx], memory_order_relaxed);
+    }
+
+    if (v_idx < vocab_size && e_idx < embedding_dim) {
+        float x_ie = float(final_hidden_states[instance_idx * embedding_dim + e_idx]);
+        float dY_iv = grad_logits[instance_idx * vocab_size + v_idx];
+        atomic_fetch_add_explicit(&grad_W_out[e_idx * vocab_size + v_idx], x_ie * dY_iv, memory_order_relaxed);
+    }
+    
+    if (v_idx == 0 && e_idx < embedding_dim) { // Let one thread per (instance, e_idx) compute this
+        float sum_val = 0.0f;
+        for (uint k = 0; k < vocab_size; ++k) {
+            float dY_ik = grad_logits[instance_idx * vocab_size + k];
+            float W_ek = float(W_out[e_idx * vocab_size + k]); // W_out is (E, V), so W_ek is correct
+            sum_val += dY_ik * W_ek;
+        }
+        grad_final_hidden_states[instance_idx * embedding_dim + e_idx] = half(sum_val);
+    }
+}
+
+// GELU derivative helper function
+float gelu_derivative(float x) {
+    const float sqrt_2_over_pi = 0.7978845608f;
+    const float a = 0.044715f;
+    
+    // Components for tanh approximation: GELU(x) = 0.5 * x * (1 + tanh(k*(x + a*x^3)))
+    float x_cubed = x * x * x;
+    float inner = sqrt_2_over_pi * (x + a * x_cubed);
+    float tanh_inner = tanh(inner);
+    float sech2_inner = 1.0f - tanh_inner * tanh_inner;  // sech^2(inner)
+    
+    // d/dx[inner] = sqrt_2_over_pi * (1 + 3*a*x^2)
+    float d_inner_dx = sqrt_2_over_pi * (1.0f + 3.0f * a * x * x);
+    
+    // Using product rule: d/dx[0.5 * x * (1 + tanh(inner))]
+    // = 0.5 * [(1 + tanh(inner)) + x * sech^2(inner) * d_inner_dx]
+    float term1 = 1.0f + tanh_inner;
+    float term2 = x * sech2_inner * d_inner_dx;
+    
+    return 0.5f * (term1 + term2);
+}
+
+/*
+ * Feed-Forward Network Backward Pass Kernel
+ *
+ * This kernel computes gradients for the FFN layer:
+ * 1. Computes dL/dW1, dL/db1, dL/dH_lin from the GELU derivative
+ * 2. Computes dL/dW2, dL/db2, dL/dH_act from the second linear layer
+ * 3. Computes dL/dX (gradient w.r.t. input)
+ *
+ * FFN Forward: X -> Linear1(W1, b1) -> GELU -> Linear2(W2, b2) -> Y
+ * FFN Backward: dL/dY -> compute all gradients and dL/dX
+ *
+ * Parameters:
+ * - grad_ffn_output: [B, S, E] gradient w.r.t. FFN output (dL/dY)
+ * - ffn_input: [B, S, E] saved FFN input from forward pass (X)
+ * - h_linear: [B, S, H] saved linear layer output before GELU (H_lin)
+ * - h_activated: [B, S, H] saved GELU output (H_act)
+ * - w1: [E, H] first linear layer weights
+ * - w2: [H, E] second linear layer weights
+ * - grad_w1: [E, H] gradient w.r.t. W1 (output, accumulated)
+ * - grad_b1: [H] gradient w.r.t. b1 (output, accumulated)
+ * - grad_w2: [H, E] gradient w.r.t. W2 (output, accumulated)  
+ * - grad_b2: [E] gradient w.r.t. b2 (output, accumulated)
+ * - grad_ffn_input: [B, S, E] gradient w.r.t. FFN input (output, dL/dX)
+ */
+kernel void ffn_backward(
+    device const half* grad_ffn_output,      // [B, S, E] dL/dY
+    device const half* ffn_input,            // [B, S, E] X (saved from forward)
+    device const half* h_linear,             // [B, S, H] H_lin (saved from forward)
+    device const half* h_activated,          // [B, S, H] H_act (saved from forward)
+    device const half* w1,                   // [E, H] first layer weights
+    device const half* w2,                   // [H, E] second layer weights
+    device atomic_float* grad_w1,            // [E, H] gradient output
+    device atomic_float* grad_b1,            // [H] gradient output
+    device atomic_float* grad_w2,            // [H, E] gradient output
+    device atomic_float* grad_b2,            // [E] gradient output
+    device half* grad_ffn_input,             // [B, S, E] gradient output (dL/dX)
+    constant uint& batch_size,
+    constant uint& seq_len,
+    constant uint& embedding_dim,
+    constant uint& ffn_hidden_dim,
+    uint3 thread_position_in_grid [[thread_position_in_grid]],
+    uint3 threads_per_grid [[threads_per_grid]]
+) {
+    uint32_t total_instances = batch_size * seq_len;
+    uint32_t instance_idx = thread_position_in_grid.x;
+    
+    if (instance_idx >= total_instances) return;
+    
+    uint32_t input_offset = instance_idx * embedding_dim;
+    uint32_t hidden_offset = instance_idx * ffn_hidden_dim;
+    
+    // Step 1: Compute dL/dH_act = grad_ffn_output @ W2^T
+    // and accumulate dL/dW2 = H_act^T @ grad_ffn_output, dL/db2 = sum(grad_ffn_output)
+    threadgroup float tg_dh_act[512];  // Assuming ffn_hidden_dim <= 512
+    
+    for (uint32_t h = 0; h < ffn_hidden_dim; h++) {
+        float dh_act_h = 0.0f;
+        
+        // dL/dH_act[h] = sum_e(dL/dY[e] * W2[h,e])
+        for (uint32_t e = 0; e < embedding_dim; e++) {
+            float grad_out_e = float(grad_ffn_output[input_offset + e]);
+            float w2_he = float(w2[h * embedding_dim + e]);
+            dh_act_h += grad_out_e * w2_he;
+            
+            // Accumulate dL/dW2[h,e] = H_act[h] * dL/dY[e]
+            float h_act_h = float(h_activated[hidden_offset + h]);
+            atomic_fetch_add_explicit(&grad_w2[h * embedding_dim + e], h_act_h * grad_out_e, memory_order_relaxed);
+        }
+        
+        tg_dh_act[h] = dh_act_h;
+    }
+    
+    // Accumulate dL/db2 = sum_instances(dL/dY)
+    for (uint32_t e = 0; e < embedding_dim; e++) {
+        float grad_out_e = float(grad_ffn_output[input_offset + e]);
+        atomic_fetch_add_explicit(&grad_b2[e], grad_out_e, memory_order_relaxed);
+    }
+    
+    // Step 2: Compute dL/dH_lin = dL/dH_act * GELU'(H_lin)
+    threadgroup float tg_dh_lin[512];  // Assuming ffn_hidden_dim <= 512
+    
+    for (uint32_t h = 0; h < ffn_hidden_dim; h++) {
+        float h_lin_h = float(h_linear[hidden_offset + h]);
+        float gelu_deriv = gelu_derivative(h_lin_h);
+        tg_dh_lin[h] = tg_dh_act[h] * gelu_deriv;
+    }
+    
+    // Step 3: Compute dL/dX = dL/dH_lin @ W1^T 
+    // and accumulate dL/dW1 = X^T @ dL/dH_lin, dL/db1 = sum(dL/dH_lin)
+    for (uint32_t e = 0; e < embedding_dim; e++) {
+        float dx_e = 0.0f;
+        
+        // dL/dX[e] = sum_h(dL/dH_lin[h] * W1[e,h])
+        for (uint32_t h = 0; h < ffn_hidden_dim; h++) {
+            float w1_eh = float(w1[e * ffn_hidden_dim + h]);
+            dx_e += tg_dh_lin[h] * w1_eh;
+            
+            // Accumulate dL/dW1[e,h] = X[e] * dL/dH_lin[h]
+            float x_e = float(ffn_input[input_offset + e]);
+            atomic_fetch_add_explicit(&grad_w1[e * ffn_hidden_dim + h], x_e * tg_dh_lin[h], memory_order_relaxed);
+        }
+        
+        grad_ffn_input[input_offset + e] = half(dx_e);
+    }
+    
+    // Accumulate dL/db1 = sum_instances(dL/dH_lin)
+    for (uint32_t h = 0; h < ffn_hidden_dim; h++) {
+        atomic_fetch_add_explicit(&grad_b1[h], tg_dh_lin[h], memory_order_relaxed);
+    }
+}
+
+// Backward pass for MHSA Output Projection
+// Y = XW_o + b_o  =>  dL/dX = dL/dY @ W_o^T, dL/dW_o = X^T @ dL/dY, dL/db_o = sum(dL/dY)
+// X is concatenated_attention_heads [B*S, E]
+// W_o is attention_output_weights [E, E]
+// b_o is attention_output_bias [E]
+// dL/dY is grad_mhsa_output [B*S, E]
+kernel void mhsa_output_projection_backward(
+    device const half* grad_mhsa_output [[buffer(0)]],           // dL/dY (B, S, E)
+    device const half* concatenated_attention_heads [[buffer(1)]], // X (B, S, E) (saved from forward)
+    device const half* W_o [[buffer(2)]],                         // W_o (E, E)
+    
+    device atomic_float* grad_W_o [[buffer(3)]],                  // dL/dW_o (E, E) (atomic accumulation)
+    device atomic_float* grad_b_o [[buffer(4)]],                  // dL/db_o (E) (atomic accumulation)
+    device half* grad_concatenated_attention_heads [[buffer(5)]], // dL/dX (B, S, E)
+    
+    constant uint& batch_size [[buffer(6)]],
+    constant uint& seq_len [[buffer(7)]],
+    constant uint& embedding_dim [[buffer(8)]],
+    uint3 gid [[thread_position_in_grid]] // gid.x for instance_idx, gid.y for e_out_idx, gid.z for e_in_idx
+) {
+    uint instance_idx = gid.x; // instance = batch_idx * sequence_length + seq_idx
+    uint e_out_idx    = gid.y; // output embedding dimension index (for dL/dX and dL/dW_o row)
+    uint e_in_idx     = gid.z; // input embedding dimension index (for dL/dW_o col)
+
+    if (instance_idx >= batch_size * seq_len) return;
+
+    // Calculate dL/db_o
+    // Each thread in the y-dimension (e_out_idx) for instance_idx=0, z_idx=0 accumulates one element of grad_b_o.
+    // This ensures each grad_b_o element is hit once per instance, then summed across instances by atomic_add.
+    if (gid.z == 0 && e_out_idx < embedding_dim) { // Only one slice of e_in_idx needed for this
+        float grad_y_ie = float(grad_mhsa_output[instance_idx * embedding_dim + e_out_idx]);
+        atomic_fetch_add_explicit(&grad_b_o[e_out_idx], grad_y_ie, memory_order_relaxed);
+    }
+
+    // Calculate dL/dW_o[e_out_idx, e_in_idx]
+    // One thread per (instance, e_out_idx, e_in_idx)
+    // dL/dW_o[j,k] += X[i,j] * dL/dY[i,k]  (Mapping: j=e_out_idx, k=e_in_idx, i=instance_idx)
+    // Here, W_o matrix is (E,E). So W_o[row_W, col_W]
+    // dL/dW_o[e_in_idx, e_out_idx] += X[instance_idx, e_in_idx] * dL/dY[instance_idx, e_out_idx]
+    // This seems to be the common GEMM grad: (input_activations)^T @ (output_gradient)
+    // So, grad_W_o[input_dim_idx, output_dim_idx]
+    // W_o[input_dim_idx, output_dim_idx]
+    // grad_W_o[e_in_idx, e_out_idx]
+    if (e_out_idx < embedding_dim && e_in_idx < embedding_dim) {
+        float x_ie_in = float(concatenated_attention_heads[instance_idx * embedding_dim + e_in_idx]); // X[instance, e_in_idx]
+        float dY_ie_out = float(grad_mhsa_output[instance_idx * embedding_dim + e_out_idx]);        // dY[instance, e_out_idx]
+        atomic_fetch_add_explicit(&grad_W_o[e_in_idx * embedding_dim + e_out_idx], x_ie_in * dY_ie_out, memory_order_relaxed);
+    }
+    
+    // Calculate dL/dX[instance_idx, e_out_idx]
+    // dL/dX[i,j] = sum_k ( dL/dY[i,k] * W_o[j,k] ) (Mapping: i=instance_idx, j=e_out_idx, k=e_in_idx)
+    // Here, dL/dX needs to be calculated for e_out_idx, so it will be the "row" index of W_o.
+    // The sum is over e_in_idx which is the "col" index of W_o.
+    if (gid.z == 0 && e_out_idx < embedding_dim) { // Let one slice of e_in_idx compute this
+        float sum_val = 0.0f;
+        for (uint k = 0; k < embedding_dim; ++k) { // k is the sum-over dimension, iterating E times (e_in_idx_loop)
+            float dY_ik = float(grad_mhsa_output[instance_idx * embedding_dim + k]); // dY[instance, k]
+            float W_jk = float(W_o[e_out_idx * embedding_dim + k]);                   // W[e_out_idx, k]
+            sum_val += dY_ik * W_jk;
+        }
+        grad_concatenated_attention_heads[instance_idx * embedding_dim + e_out_idx] = half(sum_val);
+    }
+}
+
+// Backward pass for Scaled Dot-Product Attention
+// Forward: output = softmax(Q @ K^T / sqrt(d_k)) @ V
+// Backward: Given grad_output, compute grad_Q, grad_K, grad_V
+//
+// This kernel computes gradients for multi-head attention with causal masking.
+// Input attention_weights should be saved from forward pass.
+//
+// Each thread processes one (batch, head, seq_position) and computes gradients sequentially
+// to avoid race conditions.
+kernel void scaled_dot_product_attention_backward(
+    device const half* Q [[buffer(0)]],                    // [B, S, H, D] Query
+    device const half* K [[buffer(1)]],                    // [B, S, H, D] Key
+    device const half* V [[buffer(2)]],                    // [B, S, H, D] Value
+    device const half* attention_weights [[buffer(3)]],    // [B, H, S, S] Saved from forward pass
+    device const half* grad_output [[buffer(4)]],          // [B, S, H, D] Gradient w.r.t. output
+    device half* grad_Q [[buffer(5)]],                     // [B, S, H, D] Gradient w.r.t. Q (output)
+    device half* grad_K [[buffer(6)]],                     // [B, S, H, D] Gradient w.r.t. K (output)
+    device half* grad_V [[buffer(7)]],                     // [B, S, H, D] Gradient w.r.t. V (output)
+    constant uint& batch_size [[buffer(8)]],
+    constant uint& seq_len [[buffer(9)]],
+    constant uint& num_heads [[buffer(10)]],
+    constant uint& head_dim [[buffer(11)]],
+    uint3 gid [[thread_position_in_grid]]  // gid.x = batch_idx, gid.y = head_idx, gid.z = output_seq_idx
+) {
+    uint batch_idx = gid.x;
+    uint head_idx = gid.y;
+    uint output_seq_idx = gid.z;
+    
+    if (batch_idx >= batch_size || head_idx >= num_heads || output_seq_idx >= seq_len) return;
+    
+    float scale = 1.0f / sqrt(float(head_dim));
+    
+    // Each thread is responsible for one output position (batch, head, output_seq_idx)
+    // and computes all gradients related to that position
+    
+    // First, zero-initialize the gradients for this output position
+    for (uint d = 0; d < head_dim; d++) {
+        uint out_idx = ((batch_idx * seq_len + output_seq_idx) * num_heads + head_idx) * head_dim + d;
+        grad_Q[out_idx] = half(0.0f);
+        grad_K[out_idx] = half(0.0f);
+        grad_V[out_idx] = half(0.0f);
+    }
+    
+    // Compute grad_V for this position: grad_V[output_seq_idx] comes from all input positions >= output_seq_idx
+    for (uint d = 0; d < head_dim; d++) {
+        uint v_idx = ((batch_idx * seq_len + output_seq_idx) * num_heads + head_idx) * head_dim + d;
+        float grad_v_sum = 0.0f;
+        
+        // Sum over all input positions that attend to this output position
+        for (uint input_seq_idx = output_seq_idx; input_seq_idx < seq_len; input_seq_idx++) {
+            uint attn_idx = ((batch_idx * num_heads + head_idx) * seq_len + input_seq_idx) * seq_len + output_seq_idx;
+            float attn_weight = float(attention_weights[attn_idx]);
+            
+            uint grad_out_idx = ((batch_idx * seq_len + input_seq_idx) * num_heads + head_idx) * head_dim + d;
+            grad_v_sum += attn_weight * float(grad_output[grad_out_idx]);
+        }
+        grad_V[v_idx] = half(grad_v_sum);
+    }
+    
+    // Now compute grad_Q and grad_K for positions where this position acts as input
+    // This position (output_seq_idx) can serve as input for positions >= output_seq_idx
+    
+    for (uint attending_seq_idx = output_seq_idx; attending_seq_idx < seq_len; attending_seq_idx++) {
+        // Step 1: Compute grad_attention_weights[attending_seq_idx, output_seq_idx]
+        float grad_attention_weight = 0.0f;
+        for (uint d = 0; d < head_dim; d++) {
+            uint grad_out_idx = ((batch_idx * seq_len + attending_seq_idx) * num_heads + head_idx) * head_dim + d;
+            uint v_idx = ((batch_idx * seq_len + output_seq_idx) * num_heads + head_idx) * head_dim + d;
+            grad_attention_weight += float(grad_output[grad_out_idx]) * float(V[v_idx]);
+        }
+        
+        // Step 2: Compute weighted sum for softmax backward for this attending position
+        float weighted_sum = 0.0f;
+        for (uint j = 0; j <= attending_seq_idx; j++) {
+            uint attn_idx_j = ((batch_idx * num_heads + head_idx) * seq_len + attending_seq_idx) * seq_len + j;
+            float attn_weight_j = float(attention_weights[attn_idx_j]);
+            
+            // Compute grad_attention_weight for position j
+            float grad_attn_j = 0.0f;
+            for (uint d = 0; d < head_dim; d++) {
+                uint grad_out_idx = ((batch_idx * seq_len + attending_seq_idx) * num_heads + head_idx) * head_dim + d;
+                uint v_idx_j = ((batch_idx * seq_len + j) * num_heads + head_idx) * head_dim + d;
+                grad_attn_j += float(grad_output[grad_out_idx]) * float(V[v_idx_j]);
+            }
+            weighted_sum += attn_weight_j * grad_attn_j;
+        }
+        
+        // Step 3: Compute grad_score through softmax backward
+        uint attn_idx = ((batch_idx * num_heads + head_idx) * seq_len + attending_seq_idx) * seq_len + output_seq_idx;
+        float attn_weight = float(attention_weights[attn_idx]);
+        float grad_score = attn_weight * (grad_attention_weight - weighted_sum);
+        
+        // Step 4: Accumulate grad_Q and grad_K
+        for (uint d = 0; d < head_dim; d++) {
+            uint q_idx_attending = ((batch_idx * seq_len + attending_seq_idx) * num_heads + head_idx) * head_dim + d;
+            uint k_idx_output = ((batch_idx * seq_len + output_seq_idx) * num_heads + head_idx) * head_dim + d;
+            
+            // grad_Q[attending_seq_idx, d] += scale * grad_score * K[output_seq_idx, d]
+            float current_grad_q = float(grad_Q[q_idx_attending]);
+            grad_Q[q_idx_attending] = half(current_grad_q + scale * grad_score * float(K[k_idx_output]));
+            
+            // grad_K[output_seq_idx, d] += scale * grad_score * Q[attending_seq_idx, d]
+            uint q_idx_attending_val = ((batch_idx * seq_len + attending_seq_idx) * num_heads + head_idx) * head_dim + d;
+            float current_grad_k = float(grad_K[k_idx_output]);
+            grad_K[k_idx_output] = half(current_grad_k + scale * grad_score * float(Q[q_idx_attending_val]));
+        }
+    }
+}
+
+// Backward pass for QKV Projection
+// Forward: QKV = X @ W_qkv + b_qkv (where W_qkv is concatenated [W_q; W_k; W_v])
+// Backward: Given grad_QKV, compute grad_X, grad_W_qkv, grad_b_qkv
+//
+// This is a standard linear layer backward pass applied to the concatenated QKV computation.
+//
+// Gradients:
+// - grad_X = grad_QKV @ W_qkv^T
+// - grad_W_qkv = X^T @ grad_QKV  
+// - grad_b_qkv = sum(grad_QKV) across batch and sequence dimensions
+kernel void qkv_projection_backward(
+    device const half* input [[buffer(0)]],              // [B, S, E] Input embeddings
+    device const half* qkv_weights [[buffer(1)]],        // [3*E, E] Concatenated Q,K,V weights
+    device const half* grad_qkv_output [[buffer(2)]],    // [B, S, 3*E] Gradient w.r.t. QKV output
+    device float* grad_input [[buffer(3)]],              // [B, S, E] Gradient w.r.t. input (output)
+    device float* grad_qkv_weights [[buffer(4)]],        // [3*E, E] Gradient w.r.t. weights (output)
+    device float* grad_qkv_bias [[buffer(5)]],           // [3*E] Gradient w.r.t. bias (output)
+    constant uint& batch_size [[buffer(6)]],
+    constant uint& seq_len [[buffer(7)]],
+    constant uint& embedding_dim [[buffer(8)]],
+    uint3 gid [[thread_position_in_grid]]  // gid.x = computation_type, gid.y = index1, gid.z = index2
+) {
+    uint computation_type = gid.x;  // 0=grad_input, 1=grad_weights, 2=grad_bias
+    uint index1 = gid.y;
+    uint index2 = gid.z;
+    
+    uint total_instances = batch_size * seq_len;
+    
+    if (computation_type == 0) {
+        // Compute grad_input: grad_input[instance, e_in] = sum over qkv_e_out of (weight[qkv_type][e_in][e_out] * grad_qkv_output[instance, qkv_e_out])
+        uint instance_idx = index1;
+        uint e_in_idx = index2;
+        
+        if (instance_idx >= total_instances || e_in_idx >= embedding_dim) return;
+        
+        float grad_input_sum = 0.0f;
+        
+        // Sum over all QKV output dimensions
+        for (uint qkv_e_out = 0; qkv_e_out < 3 * embedding_dim; qkv_e_out++) {
+            uint qkv_type = qkv_e_out / embedding_dim;  // 0, 1, or 2
+            uint e_out = qkv_e_out % embedding_dim;      // 0 to embedding_dim-1
+            
+            uint weight_offset = qkv_type * embedding_dim * embedding_dim + e_in_idx * embedding_dim + e_out;
+            uint grad_output_offset = instance_idx * 3 * embedding_dim + qkv_e_out;
+            
+            float weight_val = float(qkv_weights[weight_offset]);
+            float grad_out_val = float(grad_qkv_output[grad_output_offset]);
+            
+            grad_input_sum += weight_val * grad_out_val;
+        }
+        
+        uint grad_input_offset = instance_idx * embedding_dim + e_in_idx;
+        grad_input[grad_input_offset] = grad_input_sum;
+        
+    } else if (computation_type == 1) {
+        // Compute grad_weights: grad_W[qkv_type][e_in][e_out] = sum over instances of (input[instance, e_in] * grad_qkv_output[instance, qkv_type*E + e_out])
+        uint weight_idx = index1;  // Linear index into weight matrix
+        uint qkv_type = weight_idx / (embedding_dim * embedding_dim);
+        uint remaining = weight_idx % (embedding_dim * embedding_dim);
+        uint e_in_idx = remaining / embedding_dim;
+        uint e_out_idx = remaining % embedding_dim;
+        
+        if (weight_idx >= 3 * embedding_dim * embedding_dim) return;
+        if (qkv_type >= 3) return;
+        
+        float grad_weight_sum = 0.0f;
+        
+        // Sum over all instances
+        for (uint instance = 0; instance < total_instances; instance++) {
+            uint input_offset = instance * embedding_dim + e_in_idx;
+            uint grad_output_offset = instance * 3 * embedding_dim + qkv_type * embedding_dim + e_out_idx;
+            
+            float input_val = float(input[input_offset]);
+            float grad_out_val = float(grad_qkv_output[grad_output_offset]);
+            
+            grad_weight_sum += input_val * grad_out_val;
+        }
+        
+        grad_qkv_weights[weight_idx] = grad_weight_sum;
+        
+    } else if (computation_type == 2) {
+        // Compute grad_bias: grad_b[qkv_e_out] = sum over instances of grad_qkv_output[instance, qkv_e_out]
+        uint qkv_e_out_idx = index1;
+        
+        if (qkv_e_out_idx >= 3 * embedding_dim) return;
+        
+        float grad_bias_sum = 0.0f;
+        
+        // Sum over all instances
+        for (uint instance = 0; instance < total_instances; instance++) {
+            uint grad_output_offset = instance * 3 * embedding_dim + qkv_e_out_idx;
+            float grad_out_val = float(grad_qkv_output[grad_output_offset]);
+            grad_bias_sum += grad_out_val;
+        }
+        
+        grad_qkv_bias[qkv_e_out_idx] = grad_bias_sum;
+    }
+}
+
+// Backward pass for Embedding Layer
+// Forward: output_embeddings[token_position] = embedding_table[token_id]
+// Backward: grad_embedding_table[token_id] += grad_output_embeddings[token_position]
+//
+// This is a scatter-add operation where gradients from output positions are accumulated
+// into the embedding table rows corresponding to the token IDs that were used.
+// Multiple tokens in a batch might use the same token ID, requiring atomic accumulation.
+kernel void embedding_layer_backward(
+    device const uint32_t* token_ids [[buffer(0)]],            // [B, S] - Token IDs from forward pass
+    device const half* grad_output_embeddings [[buffer(1)]],   // [B, S, E] - Gradient w.r.t. output embeddings
+    device atomic_float* grad_embedding_table [[buffer(2)]],   // [V, E] - Gradient w.r.t. embedding table (output, atomic accumulation)
+    constant uint& batch_size [[buffer(3)]],
+    constant uint& seq_len [[buffer(4)]],
+    constant uint& vocab_size [[buffer(5)]],
+    constant uint& embedding_dim [[buffer(6)]],
+    constant uint& pad_token_id [[buffer(7)]],
+    uint gid [[thread_position_in_grid]]  // One thread per token position in batch
+) {
+    uint token_idx = gid;  // Index into the flattened batch (batch_size * seq_len)
+    
+    if (token_idx >= batch_size * seq_len) return;
+    
+    uint32_t token_id = token_ids[token_idx];
+    
+    // Skip padding tokens and out-of-bounds token IDs
+    if (token_id == pad_token_id || token_id >= vocab_size) return;
+    
+    uint grad_output_offset = token_idx * embedding_dim;
+    uint grad_embedding_offset = token_id * embedding_dim;
+    
+    // Accumulate gradients into embedding table using atomic operations
+    // This handles the case where multiple positions in the batch use the same token ID
+    for (uint e = 0; e < embedding_dim; e++) {
+        float grad_val = float(grad_output_embeddings[grad_output_offset + e]);
+        atomic_fetch_add_explicit(&grad_embedding_table[grad_embedding_offset + e], grad_val, memory_order_relaxed);
+    }
+}
+
+// Utility kernel: Extract separate Q, K, V from concatenated QKV buffer
+// Input: concatenated_qkv [B, S, 3*E] where 3*E = [Q, K, V] concatenated
+// Output: separate Q [B, S, H, D], K [B, S, H, D], V [B, S, H, D] buffers
+kernel void extract_qkv_from_concatenated(
+    device const half* concatenated_qkv [[buffer(0)]],   // [B, S, 3*E] Concatenated QKV
+    device half* Q [[buffer(1)]],                        // [B, S, H, D] Query output
+    device half* K [[buffer(2)]],                        // [B, S, H, D] Key output  
+    device half* V [[buffer(3)]],                        // [B, S, H, D] Value output
+    constant uint& batch_size [[buffer(4)]],
+    constant uint& seq_len [[buffer(5)]],
+    constant uint& embedding_dim [[buffer(6)]],
+    constant uint& num_heads [[buffer(7)]],
+    uint3 gid [[thread_position_in_grid]]  // gid.x = token_idx, gid.y = head_idx, gid.z = dim_idx
+) {
+    uint token_idx = gid.x;
+    uint head_idx = gid.y;
+    uint dim_idx = gid.z;
+    
+    if (token_idx >= batch_size * seq_len) return;
+    if (head_idx >= num_heads) return;
+    
+    uint head_dim = embedding_dim / num_heads;
+    if (dim_idx >= head_dim) return;
+    
+    // Calculate offsets
+    uint qkv_base_offset = token_idx * embedding_dim * 3;  // Base offset in concatenated QKV
+    uint qkv_head_offset = head_idx * head_dim + dim_idx;  // Offset within each QKV section
+    
+    uint output_offset = (token_idx * num_heads + head_idx) * head_dim + dim_idx;
+    
+    // Extract Q, K, V from concatenated buffer
+    Q[output_offset] = concatenated_qkv[qkv_base_offset + 0 * embedding_dim + qkv_head_offset]; // Q section
+    K[output_offset] = concatenated_qkv[qkv_base_offset + 1 * embedding_dim + qkv_head_offset]; // K section  
+    V[output_offset] = concatenated_qkv[qkv_base_offset + 2 * embedding_dim + qkv_head_offset]; // V section
+}
+
+// Enhanced Scaled Dot-Product Attention with Attention Weights Saving
+// This version saves the attention weights for use in backward pass
+kernel void scaled_dot_product_attention_with_weights_save(
+    device const half* qkv_input [[buffer(0)]],
+    device half* attention_output [[buffer(1)]],
+    device half* attention_weights [[buffer(2)]],        // NEW: Save attention weights for backward pass
+    constant uint& batch_size [[buffer(3)]],
+    constant uint& sequence_length [[buffer(4)]],
+    constant uint& embedding_dim [[buffer(5)]],
+    constant uint& num_heads [[buffer(6)]],
+    uint3 gid [[thread_position_in_grid]]
+) {
+    uint batch_idx = gid.x;
+    uint head_idx = gid.y;
+    
+    if (batch_idx >= batch_size || head_idx >= num_heads) return;
+    
+    uint head_dim = embedding_dim / num_heads;
+    float scale = 1.0f / sqrt(float(head_dim));
+    
+    for (uint seq_i = 0; seq_i < sequence_length; seq_i++) {
+        float max_score = -INFINITY;
+        
+        // First pass: find max score for numerical stability
+        for (uint seq_j = 0; seq_j <= seq_i; seq_j++) {
+            float score = 0.0f;
+            
+            uint q_offset = (batch_idx * sequence_length + seq_i) * embedding_dim * 3 + 0 * embedding_dim + head_idx * head_dim;
+            uint k_offset = (batch_idx * sequence_length + seq_j) * embedding_dim * 3 + 1 * embedding_dim + head_idx * head_dim;
+            
+            for (uint d = 0; d < head_dim; d++) {
+                score += float(qkv_input[q_offset + d]) * float(qkv_input[k_offset + d]);
+            }
+            
+            score *= scale;
+            max_score = max(max_score, score);
+        }
+        
+        // Second pass: compute softmax denominator
+        float sum_exp = 0.0f;
+        for (uint seq_j = 0; seq_j <= seq_i; seq_j++) {
+            float score = 0.0f;
+            
+            uint q_offset = (batch_idx * sequence_length + seq_i) * embedding_dim * 3 + 0 * embedding_dim + head_idx * head_dim;
+            uint k_offset = (batch_idx * sequence_length + seq_j) * embedding_dim * 3 + 1 * embedding_dim + head_idx * head_dim;
+            
+            for (uint d = 0; d < head_dim; d++) {
+                score += float(qkv_input[q_offset + d]) * float(qkv_input[k_offset + d]);
+            }
+            
+            score *= scale;
+            sum_exp += exp(score - max_score);
+        }
+        
+        uint output_offset = (batch_idx * sequence_length + seq_i) * embedding_dim + head_idx * head_dim;
+        
+        // Third pass: compute attention weights and output
+        for (uint d = 0; d < head_dim; d++) {
+            float output_val = 0.0f;
+            
+            for (uint seq_j = 0; seq_j <= seq_i; seq_j++) {
+                float score = 0.0f;
+                uint q_offset = (batch_idx * sequence_length + seq_i) * embedding_dim * 3 + 0 * embedding_dim + head_idx * head_dim;
+                uint k_offset = (batch_idx * sequence_length + seq_j) * embedding_dim * 3 + 1 * embedding_dim + head_idx * head_dim;
+                
+                for (uint d_inner = 0; d_inner < head_dim; d_inner++) {
+                    score += float(qkv_input[q_offset + d_inner]) * float(qkv_input[k_offset + d_inner]);
+                }
+                score *= scale;
+                
+                float attention_weight = exp(score - max_score) / sum_exp;
+                
+                // Save attention weight for backward pass (only save once per attention position)
+                if (d == 0) {
+                    uint attn_weights_offset = ((batch_idx * num_heads + head_idx) * sequence_length + seq_i) * sequence_length + seq_j;
+                    attention_weights[attn_weights_offset] = half(attention_weight);
+                }
+                
+                uint v_offset = (batch_idx * sequence_length + seq_j) * embedding_dim * 3 + 2 * embedding_dim + head_idx * head_dim;
+                output_val += attention_weight * float(qkv_input[v_offset + d]);
+            }
+            
+            attention_output[output_offset + d] = half(output_val);
+        }
+    }
+}
+
+// Inference-specific kernel: QKV Projection for a single token
+// Takes the embedding of the current token and projects it to Q, K, V.
+// Designed to be called for one token at a time during autoregressive generation.
+kernel void qkv_projection_inference(
+    device const half* current_token_embedding [[buffer(0)]], // [E] - Embedding of the current token
+    device const half* qkv_weights [[buffer(1)]],             // [3*E, E] - Combined QKV projection weights
+    device const half* qkv_bias [[buffer(2)]],                // [3*E] - Combined QKV projection bias
+    device half* Q_current [[buffer(3)]],                     // [E] - Output Q for the current token
+    device half* K_current [[buffer(4)]],                     // [E] - Output K for the current token
+    device half* V_current [[buffer(5)]],                     // [E] - Output V for the current token
+    constant uint& embedding_dim [[buffer(6)]],
+    uint gid [[thread_position_in_grid]] // gid.x over embedding_dim for Q, K, V
+) {
+    // This kernel computes Q, K, V for a single token.
+    // Each thread can compute one element of the Q, K, or V vectors.
+    // A more optimized version might have each thread compute an element for Q, K, and V
+    // or use SIMD groups for matrix multiplication if embedding_dim is large.
+
+    // For simplicity, this version assumes one thread computes one element of Q, then K, then V.
+    // The dispatch should be 1D over embedding_dim.
+
+    if (gid >= embedding_dim) return;
+
+    // Calculate Q
+    float sum_q = float(qkv_bias[gid]); // Q's bias starts at index 0
+    for (uint e = 0; e < embedding_dim; ++e) {
+        // W_q is the first E x E block of qkv_weights
+        // Weight for Q_d: qkv_weights[e * embedding_dim + d]
+        sum_q += float(current_token_embedding[e]) * float(qkv_weights[e * embedding_dim + gid]);
+    }
+    Q_current[gid] = half(sum_q);
+
+    // Calculate K
+    // K's bias starts at index embedding_dim
+    float sum_k = float(qkv_bias[embedding_dim + gid]);
+    for (uint e = 0; e < embedding_dim; ++e) {
+        // W_k is the second E x E block of qkv_weights
+        // Weight for K_d: qkv_weights[embedding_dim * embedding_dim + e * embedding_dim + d]
+        sum_k += float(current_token_embedding[e]) * float(qkv_weights[embedding_dim * embedding_dim + e * embedding_dim + gid]);
+    }
+    K_current[gid] = half(sum_k);
+
+    // Calculate V
+    // V's bias starts at index 2 * embedding_dim
+    float sum_v = float(qkv_bias[2 * embedding_dim + gid]);
+    for (uint e = 0; e < embedding_dim; ++e) {
+        // W_v is the third E x E block of qkv_weights
+        // Weight for V_d: qkv_weights[2 * embedding_dim * embedding_dim + e * embedding_dim + d]
+        sum_v += float(current_token_embedding[e]) * float(qkv_weights[2 * embedding_dim * embedding_dim + e * embedding_dim + gid]);
+    }
+    V_current[gid] = half(sum_v);
+}
+
+// Inference-specific kernel: Scaled Dot-Product Attention with KV Caching
+// Processes one token at a time, updating and using a KV cache.
+kernel void scaled_dot_product_attention_inference(
+    device const half* Q_current_token_all_heads [[buffer(0)]], // [E] - Q for current token, all heads concatenated
+    device const half* K_current_token_all_heads [[buffer(1)]], // [E] - K for current token, all heads concatenated
+    device const half* V_current_token_all_heads [[buffer(2)]], // [E] - V for current token, all heads concatenated
+    device half* kv_cache_K_layer [[buffer(3)]],      // [H, MaxS, Dh] - K cache for the current layer (flattened)
+    device half* kv_cache_V_layer [[buffer(4)]],      // [H, MaxS, Dh] - V cache for the current layer (flattened)
+    device half* attention_output_all_heads [[buffer(5)]], // [E] - Output for current token, all heads concatenated
+    constant uint& current_token_idx [[buffer(6)]],    // 0-indexed position of the current token in the sequence
+    constant uint& embedding_dim [[buffer(7)]],
+    constant uint& num_heads [[buffer(8)]],
+    constant uint& max_sequence_length [[buffer(9)]],  // Max capacity of the cache
+    uint2 gid [[thread_position_in_grid]] // gid.x = batch_idx (typically 0 for generation), gid.y = head_idx
+) {
+    uint head_idx = gid.y;
+    // uint batch_idx = gid.x; // Assuming batch_size = 1 for typical generation
+
+    if (head_idx >= num_heads) return;
+
+    uint head_dim = embedding_dim / num_heads;
+    float scale = rsqrt(float(head_dim));
+
+    // --- 1. Update KV Cache with current token's K and V for the current head ---
+    uint cache_offset_base_for_head = head_idx * max_sequence_length * head_dim;
+    uint cache_offset_for_current_token = cache_offset_base_for_head + current_token_idx * head_dim;
+
+    for (uint d = 0; d < head_dim; ++d) {
+        uint current_token_k_offset = head_idx * head_dim + d;
+        kv_cache_K_layer[cache_offset_for_current_token + d] = K_current_token_all_heads[current_token_k_offset];
+        
+        uint current_token_v_offset = head_idx * head_dim + d;
+        kv_cache_V_layer[cache_offset_for_current_token + d] = V_current_token_all_heads[current_token_v_offset];
+    }
+
+    // Ensure writes to cache are visible to all threads in the threadgroup if they were to read from it.
+    // For this kernel structure (one head per gid.y, and further parallelism within head processing if any),
+    // if all threads in a group work on the same head, this barrier is important before reading the cache.
+    // However, if each thread in the dispatch works on one head independently, it might not be strictly necessary across GID.y threads.
+    // Let's assume a threadgroup might process multiple elements of a head's attention vector.
+    threadgroup_barrier(mem_flags::mem_device); 
+
+    // --- 2. Compute Attention Scores for the current Q with all K in cache (up to current_token_idx) ---
+    // Allocate on-stack array for scores. Max size is max_sequence_length.
+    // This might be too large for stack if max_sequence_length is big; consider threadgroup memory.
+    // For now, assuming max_sequence_length is moderate.
+    float attention_scores[512]; // MaxS - TODO: Make this dynamic or use threadgroup shared memory if > ~1024 for safety
+    if (max_sequence_length > 512) { /* Error or use threadgroup memory */ }
+
+    uint sequence_length_so_far = current_token_idx + 1;
+    float max_score = -INFINITY;
+
+    for (uint j = 0; j < sequence_length_so_far; ++j) { // Iterate through tokens in cache (0 to current_token_idx)
+        float score = 0.0f;
+        uint q_offset_in_current_token = head_idx * head_dim;
+        uint k_cached_offset = cache_offset_base_for_head + j * head_dim;
+
+        for (uint d = 0; d < head_dim; ++d) {
+            score += float(Q_current_token_all_heads[q_offset_in_current_token + d]) * 
+                     float(kv_cache_K_layer[k_cached_offset + d]);
+        }
+        score *= scale;
+        attention_scores[j] = score;
+        max_score = max(max_score, score);
+    }
+
+    // --- 3. Softmax --- 
+    float sum_exp_scores = 0.0f;
+    for (uint j = 0; j < sequence_length_so_far; ++j) {
+        float exp_val = exp(attention_scores[j] - max_score);
+        attention_scores[j] = exp_val; // Store exp_val back into scores array to reuse as softmax_weights later
+        sum_exp_scores += exp_val;
+    }
+
+    // Normalize to get softmax_weights
+    for (uint j = 0; j < sequence_length_so_far; ++j) {
+        attention_scores[j] /= sum_exp_scores; // Now attention_scores holds softmax_weights[j]
+    }
+
+    // --- 4. Compute Output using softmax_weights and V from cache ---
+    // Each thread in a threadgroup could compute one element of the output vector if head_dim > 1
+    // For simplicity, let's assume the dispatch for this kernel is (batch, num_heads, head_dim_elements_group)
+    // or that a single thread calculates all head_dim elements.
+    // If a single thread per (batch, head), then it loops d from 0 to head_dim-1 here.
+    // The current gid is (batch_idx, head_idx). We need to output to attention_output_all_heads.
+
+    uint output_base_offset_for_head = head_idx * head_dim;
+    for (uint d_out = 0; d_out < head_dim; ++d_out) { // Iterate over each dimension of the output head vector
+        float output_val_d = 0.0f;
+        for (uint j = 0; j < sequence_length_so_far; ++j) { // Iterate through tokens in cache
+            float softmax_weight = attention_scores[j];
+            uint v_cached_offset = cache_offset_base_for_head + j * head_dim;
+            output_val_d += softmax_weight * float(kv_cache_V_layer[v_cached_offset + d_out]);
+        }
+        attention_output_all_heads[output_base_offset_for_head + d_out] = half(output_val_d);
+    }
+} 
