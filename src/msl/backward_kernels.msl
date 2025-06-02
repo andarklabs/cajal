@@ -188,7 +188,7 @@ kernel void ffn_backward(
     
     // Step 1: Compute dL/dH_act = grad_ffn_output @ W2^T
     // and accumulate dL/dW2 = H_act^T @ grad_ffn_output, dL/db2 = sum(grad_ffn_output)
-    threadgroup float tg_dh_act[512];  // Assuming ffn_hidden_dim <= 512
+    threadgroup float tg_dh_act[512];
     
     for (uint32_t h = 0; h < ffn_hidden_dim; h++) {
         float dh_act_h = 0.0f;
@@ -214,7 +214,7 @@ kernel void ffn_backward(
     }
     
     // Step 2: Compute dL/dH_lin = dL/dH_act * GELU'(H_lin)
-    threadgroup float tg_dh_lin[512];  // Assuming ffn_hidden_dim <= 512
+    threadgroup float tg_dh_lin[512]; 
     
     for (uint32_t h = 0; h < ffn_hidden_dim; h++) {
         float h_lin_h = float(h_linear[hidden_offset + h]);

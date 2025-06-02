@@ -9,6 +9,7 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include <atomic>
 
 // Model configuration structure
 struct TransformerConfig {
@@ -243,7 +244,7 @@ protected:
     bool computeLoss(const std::vector<uint32_t>& input_tokens,
                     const std::vector<uint32_t>& target_tokens,
                     float& loss_value);
-    bool backwardPass();
+    bool backwardPass(size_t current_sequence_index = 0);
     bool optimizerStep();
     float calculateLearningRate(uint32_t step);
     
@@ -262,6 +263,19 @@ protected:
                                     uint32_t max_new_tokens,
                                     std::vector<uint32_t>& generated_sequence,
                                     float temperature);
+
+    bool m_is_diagnostic_run; // For targeted diagnostics
+    uint32_t m_current_kv_cache_pos; // For KV cache management in inference
+
+    // Diagnostic Canary Buffers
+    id<MTLBuffer> m_canary_buffer_before;
+    id<MTLBuffer> m_canary_buffer_after;
+
+    std::atomic<bool> m_critical_gpu_error_occurred; // For command buffer error detection
+
+private:
+    // Metal objects
+    // ... existing code ...
 
 public:
     TransformerModel(const TransformerConfig& config);
