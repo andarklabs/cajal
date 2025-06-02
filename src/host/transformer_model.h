@@ -212,12 +212,16 @@ struct WorkingBuffers {
 };
 
 class TransformerModel {
-private:
-    TransformerConfig config;
+protected:
+    // Core Metal objects
     id<MTLDevice> device;
     id<MTLCommandQueue> commandQueue;
     id<MTLLibrary> library;
     
+    // Configuration and state
+    TransformerConfig config;
+    
+    // MSL kernels and data structures
     MSLKernels kernels;
     ModelWeights weights;
     GradientBuffers gradients;
@@ -249,6 +253,15 @@ private:
 
     // Helper for inference sampling
     uint32_t sampleGreedy(const float* logits, uint32_t vocab_size);
+
+    // Inference helper methods
+    bool clearKVCache();
+    bool populateKVCacheWithPrompt(const std::vector<uint32_t>& prompt_tokens);
+    bool generateNextToken(uint32_t current_token, uint32_t& next_token, float temperature, uint32_t current_position);
+    bool generateWithTrainingKernels(const std::vector<uint32_t>& prompt_tokens,
+                                    uint32_t max_new_tokens,
+                                    std::vector<uint32_t>& generated_sequence,
+                                    float temperature);
 
 public:
     TransformerModel(const TransformerConfig& config);

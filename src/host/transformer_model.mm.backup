@@ -1615,10 +1615,8 @@ bool TransformerModel::forward(const std::vector<uint32_t>& input_tokens,
     [encoder dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
 
     [encoder endEncoding];
-    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-        // Async completion - no CPU blocking
-    }];
     [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
 
     // Copy logits back to CPU
     output_logits.resize(actual_batch_size * actual_sequence_length * config.vocab_size);
@@ -1675,10 +1673,8 @@ bool TransformerModel::computeLoss(const std::vector<uint32_t>& input_tokens,
         [encoder endEncoding];
     }
     
-    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-        // Async completion - no CPU blocking
-    }];
     [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
     
     // Read back loss and compute average
     loss_data = static_cast<float*>([buffers.loss_buffer contents]);
@@ -1737,19 +1733,13 @@ bool TransformerModel::trainStep(const std::vector<uint32_t>& input_tokens,
         [encoder endEncoding];
     }
     
-    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-        // Async completion - no CPU blocking
-    }];
     [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
     
     // Step 4: Backward pass - compute parameter gradients
     if (!backwardPass()) {
         return false;
     }
-    
-    // 🔄 STRATEGIC SYNC: Only wait before optimizer (when gradients needed)
-    std::cout << "⏳ Strategic sync before optimizer step..." << std::endl;
-    // Strategic sync: Let GPU complete all pending work
     
     // Step 5: Optimizer step  
     if (!optimizerStep()) {
@@ -1814,10 +1804,8 @@ bool TransformerModel::zeroGradients() {
         }
     }
     
-    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-        // Async completion - no CPU blocking
-    }];
     [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
     
     return true;
 }
@@ -1889,10 +1877,8 @@ bool TransformerModel::optimizerStep() {
     dispatch_optimizer(weights.output_bias, gradients.output_bias_grad);
 
     [encoder endEncoding];
-    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-        // Async completion - no CPU blocking
-    }];
     [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
 
     return true;
 }
@@ -2229,10 +2215,8 @@ bool TransformerModel::backwardPass() {
     }
 
     [encoder endEncoding];
-    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-        // Async completion - no CPU blocking
-    }];
     [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
 
     return true;
 }
@@ -2564,10 +2548,8 @@ bool TransformerModel::populateKVCacheWithPrompt(const std::vector<uint32_t>& pr
     }
     
     [encoder endEncoding];
-    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-        // Async completion - no CPU blocking
-    }];
     [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
     
     std::cout << "✓ KV cache populated with prompt (" << prompt_tokens.size() << " tokens)" << std::endl;
     return true;
@@ -2760,10 +2742,8 @@ bool TransformerModel::generateNextToken(uint32_t current_token, uint32_t& next_
     [encoder dispatchThreads:singleTokenGrid threadsPerThreadgroup:singleTokenGroup];
     
     [encoder endEncoding];
-    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-        // Async completion - no CPU blocking
-    }];
     [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
     
     // Sample next token from logits
     float* logits_data = static_cast<float*>([buffers.final_logits contents]);
@@ -2815,164 +2795,3 @@ uint32_t TransformerModel::sampleGreedy(const float* logits, uint32_t vocab_size
     
     return best_token;
 } 
-
-bool TransformerModel::trainBatch(const std::vector<std::vector<uint32_t>>& input_batch,
-                                 const std::vector<std::vector<uint32_t>>& target_batch,
-                                 float& avg_loss) {
-    if (input_batch.size() != target_batch.size()) {
-        std::cerr << "Input batch and target batch sizes must match" << std::endl;
-        return false;
-    }
-    
-    if (input_batch.empty()) {
-        std::cerr << "Empty batch provided" << std::endl;
-        return false;
-    }
-    
-    std::cout << "Training batch of " << input_batch.size() << " sequences..." << std::endl;
-    
-    // Step 1: Zero gradients once for the entire batch
-    if (!zeroGradients()) {
-        std::cout << "❌ Failed to zero gradients" << std::endl;
-        return false;
-    }
-    
-    float total_loss = 0.0f;
-    uint32_t valid_sequences = 0;
-    
-    // Step 2: Accumulate gradients across all sequences in the batch
-    for (size_t i = 0; i < input_batch.size(); i++) {
-        const auto& input_seq = input_batch[i];
-        const auto& target_seq = target_batch[i];
-        
-        if (input_seq.size() != target_seq.size()) {
-            std::cerr << "⚠️  Skipping sequence " << i << ": input and target length mismatch" << std::endl;
-            continue;
-        }
-        
-        if (input_seq.empty() || input_seq.size() > config.max_sequence_length) {
-            std::cerr << "⚠️  Skipping sequence " << i << ": invalid length (" << input_seq.size() << ")" << std::endl;
-            continue;
-        }
-        
-        // Forward pass and loss computation
-        float sequence_loss;
-        if (!computeLoss(input_seq, target_seq, sequence_loss)) {
-            std::cerr << "⚠️  Failed to compute loss for sequence " << i << std::endl;
-            continue;
-        }
-        
-        total_loss += sequence_loss;
-        valid_sequences++;
-        
-        // Compute loss gradients (starting point for backprop)
-        uint32_t actual_batch_size = 1;
-        uint32_t actual_sequence_length = static_cast<uint32_t>(input_seq.size());
-        
-        // Copy target tokens to buffer for gradient computation
-        uint32_t* target_data = static_cast<uint32_t*>([buffers.target_tokens contents]);
-        std::copy(target_seq.begin(), target_seq.end(), target_data);
-        
-        id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
-        
-        // Compute gradient of loss w.r.t. logits
-        {
-            id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-            [encoder setComputePipelineState:kernels.loss_gradient];
-            [encoder setBuffer:buffers.final_logits offset:0 atIndex:0];
-            [encoder setBuffer:buffers.target_tokens offset:0 atIndex:1];
-            [encoder setBuffer:buffers.logits_grad offset:0 atIndex:2];
-            [encoder setBytes:&actual_batch_size length:sizeof(uint32_t) atIndex:3];
-            [encoder setBytes:&actual_sequence_length length:sizeof(uint32_t) atIndex:4];
-            [encoder setBytes:&config.vocab_size length:sizeof(uint32_t) atIndex:5];
-            [encoder setBytes:&config.pad_token_id length:sizeof(uint32_t) atIndex:6];
-            
-            MTLSize threadsPerGrid = MTLSizeMake(actual_batch_size, actual_sequence_length, 1);
-            MTLSize threadsPerThreadgroup = MTLSizeMake(1, 1, 1);
-            [encoder dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
-            [encoder endEncoding];
-        }
-        
-        [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-            // Async completion - no CPU blocking
-        }];
-        [commandBuffer commit];
-        
-        // Backward pass - accumulate parameter gradients
-        if (!backwardPass()) {
-            std::cerr << "⚠️  Failed backward pass for sequence " << i << std::endl;
-            continue;
-        }
-        
-        if ((i + 1) % 10 == 0) {
-            std::cout << "  Processed " << (i + 1) << "/" << input_batch.size() << " sequences, avg loss: " 
-                      << (total_loss / valid_sequences) << std::endl;
-        }
-    }
-    
-    if (valid_sequences == 0) {
-        std::cerr << "❌ No valid sequences processed in batch" << std::endl;
-        return false;
-    }
-    
-    // Step 3: Average the accumulated gradients
-    avg_loss = total_loss / valid_sequences;
-    
-    // Scale gradients by 1/batch_size (since they were accumulated)
-    float scale_factor = 1.0f / valid_sequences;
-    
-    // Apply gradient scaling using simple CPU scaling
-    std::vector<id<MTLBuffer>> grad_buffers_to_scale = {
-        gradients.token_embeddings_grad,
-        gradients.final_ln_gamma_grad,
-        gradients.final_ln_beta_grad,
-        gradients.output_weights_grad,
-        gradients.output_bias_grad
-    };
-    
-    // Add transformer block gradients
-    for (uint32_t layer = 0; layer < config.num_layers; layer++) {
-        auto& block_grad = gradients.blocks_grad[layer];
-        grad_buffers_to_scale.insert(grad_buffers_to_scale.end(), {
-            block_grad.qkv_weights,
-            block_grad.qkv_bias,
-            block_grad.attention_output_weights,
-            block_grad.attention_output_bias,
-            block_grad.ln1_gamma,
-            block_grad.ln1_beta,
-            block_grad.ln2_gamma,
-            block_grad.ln2_beta,
-            block_grad.ffn_w1,
-            block_grad.ffn_b1,
-            block_grad.ffn_w2,
-            block_grad.ffn_b2
-        });
-    }
-    
-    // Scale gradients
-    for (id<MTLBuffer> buffer : grad_buffers_to_scale) {
-        if (buffer) {
-            uint32_t buffer_size = static_cast<uint32_t>([buffer length] / sizeof(float));
-            float* grad_data = static_cast<float*>([buffer contents]);
-            
-            // Simple CPU scaling for now (could be done in MSL for better performance)
-            for (uint32_t j = 0; j < buffer_size; j++) {
-                grad_data[j] *= scale_factor;
-            }
-        }
-    }
-    
-    // 🔄 STRATEGIC SYNC: Only wait before optimizer (when gradients needed)
-    std::cout << "⏳ Strategic sync before optimizer step..." << std::endl;
-    
-    // Step 4: Single optimizer step with averaged gradients
-    if (!optimizerStep()) {
-        std::cout << "❌ Failed optimizer step" << std::endl;
-        return false;
-    }
-    
-    std::cout << "✅ Batch training completed. Valid sequences: " << valid_sequences 
-              << "/" << input_batch.size() << ", avg loss: " << avg_loss << std::endl;
-    
-    return true;
-}
