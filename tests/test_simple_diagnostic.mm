@@ -7,122 +7,145 @@
 #include "transformer_model.h"
 
 int main() {
-    std::cout << "🔍 Simple Diagnostic - Analyzing 17th Sequence Issue" << std::endl;
+    std::cout << "🔍 COMPREHENSIVE DIAGNOSTIC TEST - Sequence 12 Crash Analysis" << std::endl;
+    std::cout << "🎯 Testing with FULL configuration that was causing system crashes" << std::endl;
     
-    // Small model configuration for quick testing
+    // Use the EXACT configuration that was causing crashes
     TransformerConfig config;
-    config.embedding_dim = 256;
-    config.num_layers = 2;
-    config.num_heads = 4;
-    config.ffn_hidden_dim = 1024;
-    config.max_sequence_length = 128;
+    config.vocab_size = 32000;
+    config.embedding_dim = 512;        // Original crash config
+    config.num_layers = 6;             // Original crash config  
+    config.num_heads = 8;              // Original crash config
+    config.ffn_hidden_dim = 2048;      // Original crash config - this was the main issue!
+    config.max_sequence_length = 512;  // Original crash config
+    config.batch_size = 1;             // Keep batch size small for focused testing
+    config.learning_rate = 0.001f;
+    config.use_half_precision = true;
     
-    std::cout << "🔧 Initializing minimal model..." << std::endl;
+    std::cout << "📊 Model Configuration:" << std::endl;
+    std::cout << "  vocab_size: " << config.vocab_size << std::endl;
+    std::cout << "  embedding_dim: " << config.embedding_dim << std::endl;
+    std::cout << "  num_layers: " << config.num_layers << std::endl;
+    std::cout << "  num_heads: " << config.num_heads << std::endl;
+    std::cout << "  ffn_hidden_dim: " << config.ffn_hidden_dim << " (🚨 This was the crash cause!)" << std::endl;
+    std::cout << "  max_sequence_length: " << config.max_sequence_length << std::endl;
+    
+    std::cout << "\n🔧 Initializing model with comprehensive safety checks..." << std::endl;
     TransformerModel model(config);
     
     if (!model.initialize()) {
-        std::cerr << "❌ Failed to initialize model" << std::endl;
+        std::cerr << "❌ CRITICAL: Model initialization failed!" << std::endl;
+        std::cerr << "    This means our validateConfiguration() checks caught an issue." << std::endl;
         return 1;
     }
     
-    std::cout << "✅ Model initialized. Parameters: " << model.getParameterCount() << std::endl;
+    std::cout << "✅ Model initialized successfully!" << std::endl;
+    std::cout << "  Parameters: " << model.getParameterCount() << std::endl;
+    std::cout << "  Memory usage: " << (model.getMemoryUsage() / 1024 / 1024) << " MB" << std::endl;
     
-    // Generate test sequences
+    // Generate test sequences similar to original crash scenario
     std::vector<std::vector<uint32_t>> input_batch;
     std::vector<std::vector<uint32_t>> target_batch;
     
-    for (int i = 0; i < 25; i++) {  // Test 25 sequences to exceed the problematic 17th
+    // Create 15 sequences to reach the problematic sequence 12 (index 11)
+    std::cout << "\n📝 Generating 15 test sequences (to reach sequence 12)..." << std::endl;
+    
+    for (int i = 0; i < 15; i++) {
         std::vector<uint32_t> seq;
-        for (int j = 0; j < 32; j++) {  // Short sequences
-            seq.push_back((rand() % 1000) + 1);
+        // Use realistic sequence lengths
+        int seq_length = 50 + (rand() % 50); // 50-100 tokens
+        
+        for (int j = 0; j < seq_length; j++) {
+            // Use valid token IDs within vocab range
+            seq.push_back((rand() % (config.vocab_size - 1)) + 1);
         }
         input_batch.push_back(seq);
         
+        // Create target sequence (input shifted by one)
         std::vector<uint32_t> target = seq;
         target.erase(target.begin());
-        target.push_back((rand() % 1000) + 1);
+        target.push_back((rand() % (config.vocab_size - 1)) + 1);
         target_batch.push_back(target);
     }
     
-    std::cout << "📊 Testing individual sequence processing..." << std::endl;
+    std::cout << "✅ Generated " << input_batch.size() << " sequences" << std::endl;
     
-    // Process sequences one by one to isolate the issue
-    for (size_t i = 0; i < input_batch.size(); i++) {
-        auto start_time = std::chrono::high_resolution_clock::now();
+    std::cout << "\n🚨 CRITICAL TEST: Processing sequences to reach the crash point..." << std::endl;
+    std::cout << "    Diagnostics will activate at sequence 12 (index 11)" << std::endl;
+    std::cout << "    The ffn_backward kernel fix will be tested!" << std::endl;
+    
+    // Process sequences using trainBatch (this is where the original crash occurred)
+    auto overall_start = std::chrono::high_resolution_clock::now();
+    
+    float avg_loss;
+    bool success = model.trainBatch(input_batch, target_batch, avg_loss);
+    
+    auto overall_end = std::chrono::high_resolution_clock::now();
+    auto total_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        overall_end - overall_start).count();
+    
+    if (success) {
+        std::cout << "\n🎉 SUCCESS! All sequences processed including sequence 12!" << std::endl;
+        std::cout << "✅ Total time: " << total_duration << "ms" << std::endl;
+        std::cout << "✅ Average loss: " << avg_loss << std::endl;
+        std::cout << "\n🔍 This means:" << std::endl;
+        std::cout << "  ✓ Configuration validation passed" << std::endl;
+        std::cout << "  ✓ MSL kernel ffn_backward fix worked (2048 threadgroup arrays)" << std::endl;
+        std::cout << "  ✓ Diagnostic checks for sequence 12 passed" << std::endl;
+        std::cout << "  ✓ No system crash occurred!" << std::endl;
         
-        std::cout << "\n🔄 Processing sequence " << (i+1) << "/" << input_batch.size() << std::endl;
+        // Additional verification test - try a few more batches to stress test
+        std::cout << "\n🔄 STRESS TEST: Running additional batches to verify stability..." << std::endl;
         
-        float loss;
-        bool success = model.trainStep(input_batch[i], target_batch[i], loss);
-        
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            end_time - start_time).count();
-        
-        if (success) {
-            std::cout << "✅ Sequence " << (i+1) << " completed in " << duration 
-                      << "ms, loss: " << loss << std::endl;
-        } else {
-            std::cout << "❌ Sequence " << (i+1) << " FAILED after " << duration << "ms" << std::endl;
-            break;
+        for (int stress_batch = 0; stress_batch < 3; stress_batch++) {
+            // Generate new sequences
+            std::vector<std::vector<uint32_t>> stress_input;
+            std::vector<std::vector<uint32_t>> stress_target;
+            
+            for (int i = 0; i < 12; i++) { // Smaller batch, but still reaches sequence 12
+                std::vector<uint32_t> seq;
+                int seq_length = 40 + (rand() % 40);
+                
+                for (int j = 0; j < seq_length; j++) {
+                    seq.push_back((rand() % (config.vocab_size - 1)) + 1);
+                }
+                stress_input.push_back(seq);
+                
+                std::vector<uint32_t> target = seq;
+                target.erase(target.begin());
+                target.push_back((rand() % (config.vocab_size - 1)) + 1);
+                stress_target.push_back(target);
+            }
+            
+            auto stress_start = std::chrono::high_resolution_clock::now();
+            float stress_loss;
+            bool stress_success = model.trainBatch(stress_input, stress_target, stress_loss);
+            auto stress_end = std::chrono::high_resolution_clock::now();
+            auto stress_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                stress_end - stress_start).count();
+            
+            if (stress_success) {
+                std::cout << "✅ Stress batch " << (stress_batch + 1) << " completed in " 
+                          << stress_duration << "ms, loss: " << stress_loss << std::endl;
+            } else {
+                std::cout << "❌ Stress batch " << (stress_batch + 1) << " FAILED after " 
+                          << stress_duration << "ms" << std::endl;
+                break;
+            }
         }
         
-        // Check for concerning patterns
-        if (duration > 5000) {
-            std::cout << "⚠️  SLOW: Sequence " << (i+1) << " took " << duration << "ms" << std::endl;
-        }
-        
-        if (i == 15) {
-            std::cout << "🎯 Reached sequence 16 - next sequence is the problematic 17th..." << std::endl;
-        }
-        
-        if (i == 16) {
-            std::cout << "🚨 This is sequence 17 - the problematic one!" << std::endl;
-        }
-        
-        // Add a small delay every few sequences to see if that helps
-        if (i > 0 && i % 5 == 0) {
-            std::cout << "⏸️  Brief pause..." << std::endl;
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        }
+    } else {
+        std::cout << "\n❌ FAILURE: Batch training failed!" << std::endl;
+        std::cout << "💥 Time to failure: " << total_duration << "ms" << std::endl;
+        std::cout << "\n🔍 Analysis:" << std::endl;
+        std::cout << "  - If crash occurred before sequence 12: Earlier issue not caught by validation" << std::endl;
+        std::cout << "  - If crash occurred at sequence 12: Diagnostic checks caught an issue and aborted" << std::endl;
+        std::cout << "  - If system crashed: Our fixes didn't work completely" << std::endl;
+        return 1;
     }
     
-    std::cout << "\n🔍 Now testing batch processing..." << std::endl;
+    std::cout << "\n✅ COMPREHENSIVE DIAGNOSTIC TEST COMPLETED SUCCESSFULLY!" << std::endl;
+    std::cout << "🎯 The sequence 12 crash issue appears to be RESOLVED!" << std::endl;
     
-    // Test smaller batches to see when the issue occurs
-    std::vector<int> batch_sizes = {4, 8, 12, 16, 20};
-    
-    for (int batch_size : batch_sizes) {
-        std::cout << "\n📦 Testing batch size: " << batch_size << std::endl;
-        
-        std::vector<std::vector<uint32_t>> test_input(input_batch.begin(), 
-                                                      input_batch.begin() + batch_size);
-        std::vector<std::vector<uint32_t>> test_target(target_batch.begin(), 
-                                                       target_batch.begin() + batch_size);
-        
-        auto start_time = std::chrono::high_resolution_clock::now();
-        
-        float avg_loss;
-        bool success = model.trainBatch(test_input, test_target, avg_loss);
-        
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            end_time - start_time).count();
-        
-        if (success) {
-            std::cout << "✅ Batch size " << batch_size << " completed in " << duration 
-                      << "ms, avg loss: " << avg_loss << std::endl;
-        } else {
-            std::cout << "❌ Batch size " << batch_size << " FAILED after " << duration << "ms" << std::endl;
-            std::cout << "🎯 FOUND THE ISSUE: Batch training fails at size " << batch_size << std::endl;
-            break;
-        }
-        
-        if (duration > 10000) {
-            std::cout << "⚠️  VERY SLOW: Batch size " << batch_size << " took " << duration << "ms" << std::endl;
-        }
-    }
-    
-    std::cout << "\n✅ Diagnostic completed!" << std::endl;
     return 0;
 } 

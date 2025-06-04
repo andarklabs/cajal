@@ -46,6 +46,12 @@ TransformerModel::~TransformerModel() {
 bool TransformerModel::initialize() {
     std::cout << "Initializing Transformer Model..." << std::endl;
     
+    // CRITICAL: Validate configuration before any initialization
+    if (!validateConfiguration()) {
+        std::cerr << "❌ CRITICAL: Configuration validation failed. Refusing to initialize unsafe model." << std::endl;
+        return false;
+    }
+    
     if (!initializeMetal()) {
         std::cerr << "Failed to initialize Metal" << std::endl;
         return false;
@@ -86,16 +92,224 @@ bool TransformerModel::initialize() {
     return true;
 }
 
+bool TransformerModel::validateConfiguration() {
+    std::cout << "🔍 CONFIGURATION VALIDATION: Checking for known vulnerabilities..." << std::endl;
+    
+    // VULNERABILITY CHECK 1: Division by zero errors
+    if (config.vocab_size == 0) {
+        std::cerr << "❌ CRITICAL CONFIG: vocab_size cannot be 0 (causes division by zero)" << std::endl;
+        return false;
+    }
+    if (config.embedding_dim == 0) {
+        std::cerr << "❌ CRITICAL CONFIG: embedding_dim cannot be 0 (causes division by zero)" << std::endl;
+        return false;
+    }
+    if (config.num_heads == 0) {
+        std::cerr << "❌ CRITICAL CONFIG: num_heads cannot be 0 (causes division by zero)" << std::endl;
+        return false;
+    }
+    if (config.num_layers == 0) {
+        std::cerr << "❌ CRITICAL CONFIG: num_layers cannot be 0 (invalid model)" << std::endl;
+        return false;
+    }
+    if (config.ffn_hidden_dim == 0) {
+        std::cerr << "❌ CRITICAL CONFIG: ffn_hidden_dim cannot be 0 (invalid model)" << std::endl;
+        return false;
+    }
+    if (config.max_sequence_length == 0) {
+        std::cerr << "❌ CRITICAL CONFIG: max_sequence_length cannot be 0 (invalid model)" << std::endl;
+        return false;
+    }
+    
+    // VULNERABILITY CHECK 2: Head dimension calculation
+    if (config.embedding_dim % config.num_heads != 0) {
+        std::cerr << "❌ CRITICAL CONFIG: embedding_dim (" << config.embedding_dim << ") must be divisible by num_heads (" << config.num_heads << ")" << std::endl;
+        return false;
+    }
+    uint32_t head_dim = config.embedding_dim / config.num_heads;
+    if (head_dim == 0) {
+        std::cerr << "❌ CRITICAL CONFIG: calculated head_dim is 0 (emb_dim: " << config.embedding_dim << ", num_heads: " << config.num_heads << ")" << std::endl;
+        return false;
+    }
+    
+    // VULNERABILITY CHECK 3: MSL Kernel Threadgroup Array Bounds
+    // Check against known hardcoded array sizes in our MSL kernels
+    
+    // 3a. layer_norm_backward threadgroup arrays (currently 1024)
+    const uint32_t LAYER_NORM_THREADGROUP_SIZE = 1024;
+    if (config.embedding_dim > LAYER_NORM_THREADGROUP_SIZE) {
+        std::cerr << "❌ CRITICAL CONFIG: embedding_dim (" << config.embedding_dim << ") > MSL layer_norm_backward threadgroup array size (" << LAYER_NORM_THREADGROUP_SIZE << ")" << std::endl;
+        std::cerr << "    This would cause buffer overflow in layer_norm_backward kernel." << std::endl;
+        return false;
+    }
+    
+    // 3b. ffn_backward threadgroup arrays (updated to 2048)
+    const uint32_t FFN_BACKWARD_THREADGROUP_SIZE = 2048;
+    if (config.ffn_hidden_dim > FFN_BACKWARD_THREADGROUP_SIZE) {
+        std::cerr << "❌ CRITICAL CONFIG: ffn_hidden_dim (" << config.ffn_hidden_dim << ") > MSL ffn_backward threadgroup array size (" << FFN_BACKWARD_THREADGROUP_SIZE << ")" << std::endl;
+        std::cerr << "    This would cause buffer overflow in ffn_backward kernel." << std::endl;
+        return false;
+    }
+    
+    // VULNERABILITY CHECK 4: Stack buffer overflow in attention inference kernel
+    const uint32_t ATTENTION_STACK_BUFFER_SIZE = 512;
+    if (config.max_sequence_length > ATTENTION_STACK_BUFFER_SIZE) {
+        std::cerr << "❌ CRITICAL CONFIG: max_sequence_length (" << config.max_sequence_length << ") > MSL attention kernel stack buffer size (" << ATTENTION_STACK_BUFFER_SIZE << ")" << std::endl;
+        std::cerr << "    This would cause stack buffer overflow in scaled_dot_product_attention_inference kernel." << std::endl;
+        return false;
+    }
+    
+    // VULNERABILITY CHECK 5: Memory allocation size checks
+    // Check for potential integer overflow in buffer size calculations
+    uint64_t token_embeddings_size = (uint64_t)config.vocab_size * config.embedding_dim * sizeof(uint16_t);
+    uint64_t output_weights_size = (uint64_t)config.embedding_dim * config.vocab_size * sizeof(uint16_t);
+    uint64_t max_sequence_buffer_size = (uint64_t)config.max_sequence_length * config.embedding_dim * sizeof(uint16_t);
+    
+    const uint64_t MAX_SAFE_BUFFER_SIZE = 2ULL * 1024 * 1024 * 1024; // 2GB limit
+    
+    if (token_embeddings_size > MAX_SAFE_BUFFER_SIZE) {
+        std::cerr << "❌ CRITICAL CONFIG: token_embeddings buffer too large (" << (token_embeddings_size / 1024 / 1024) << " MB)" << std::endl;
+        return false;
+    }
+    if (output_weights_size > MAX_SAFE_BUFFER_SIZE) {
+        std::cerr << "❌ CRITICAL CONFIG: output_weights buffer too large (" << (output_weights_size / 1024 / 1024) << " MB)" << std::endl;
+        return false;
+    }
+    if (max_sequence_buffer_size > MAX_SAFE_BUFFER_SIZE) {
+        std::cerr << "❌ CRITICAL CONFIG: sequence buffer too large (" << (max_sequence_buffer_size / 1024 / 1024) << " MB)" << std::endl;
+        return false;
+    }
+    
+    // VULNERABILITY CHECK 6: Reasonable parameter bounds
+    if (config.vocab_size > 1000000) { // 1M vocab size is extremely large
+        std::cerr << "❌ CRITICAL CONFIG: vocab_size (" << config.vocab_size << ") unreasonably large (> 1M)" << std::endl;
+        return false;
+    }
+    if (config.embedding_dim > 8192) { // 8K embedding dim is extremely large
+        std::cerr << "❌ CRITICAL CONFIG: embedding_dim (" << config.embedding_dim << ") unreasonably large (> 8K)" << std::endl;
+        return false;
+    }
+    if (config.num_heads > 64) { // 64 heads is extremely large
+        std::cerr << "❌ CRITICAL CONFIG: num_heads (" << config.num_heads << ") unreasonably large (> 64)" << std::endl;
+        return false;
+    }
+    if (config.ffn_hidden_dim > 32768) { // 32K FFN dim is extremely large
+        std::cerr << "❌ CRITICAL CONFIG: ffn_hidden_dim (" << config.ffn_hidden_dim << ") unreasonably large (> 32K)" << std::endl;
+        return false;
+    }
+    if (config.max_sequence_length > 4096) { // 4K sequence length is very large
+        std::cerr << "❌ CRITICAL CONFIG: max_sequence_length (" << config.max_sequence_length << ") unreasonably large (> 4K)" << std::endl;
+        return false;
+    }
+    
+    // VULNERABILITY CHECK 7: Learning rate and numerical stability
+    if (config.learning_rate <= 0.0f || config.learning_rate > 1.0f) {
+        std::cerr << "❌ CRITICAL CONFIG: learning_rate (" << config.learning_rate << ") out of safe range (0, 1]" << std::endl;
+        return false;
+    }
+    if (config.epsilon <= 0.0f || config.epsilon > 1.0f) {
+        std::cerr << "❌ CRITICAL CONFIG: epsilon (" << config.epsilon << ") out of safe range (0, 1]" << std::endl;
+        return false;
+    }
+    
+    // VULNERABILITY CHECK 8: AdamW optimizer parameters
+    if (config.beta1 <= 0.0f || config.beta1 >= 1.0f) {
+        std::cerr << "❌ CRITICAL CONFIG: beta1 (" << config.beta1 << ") out of safe range (0, 1)" << std::endl;
+        return false;
+    }
+    if (config.beta2 <= 0.0f || config.beta2 >= 1.0f) {
+        std::cerr << "❌ CRITICAL CONFIG: beta2 (" << config.beta2 << ") out of safe range (0, 1)" << std::endl;
+        return false;
+    }
+    if (config.adam_epsilon <= 0.0f) {
+        std::cerr << "❌ CRITICAL CONFIG: adam_epsilon (" << config.adam_epsilon << ") must be positive" << std::endl;
+        return false;
+    }
+    
+    // VULNERABILITY CHECK 9: Check for potential Metal device memory limitations
+    id<MTLDevice> temp_device = MTLCreateSystemDefaultDevice();
+    if (temp_device) {
+        uint64_t recommended_working_set = [temp_device recommendedMaxWorkingSetSize];
+        uint64_t estimated_model_memory = token_embeddings_size + output_weights_size + (max_sequence_buffer_size * 10); // Rough estimate with overhead
+        
+        if (estimated_model_memory > recommended_working_set) {
+            std::cerr << "⚠️  WARNING CONFIG: Estimated model memory (" << (estimated_model_memory / 1024 / 1024) << " MB) exceeds device recommended working set (" << (recommended_working_set / 1024 / 1024) << " MB)" << std::endl;
+            std::cerr << "    This may cause memory pressure and instability." << std::endl;
+        }
+        
+        if ([temp_device hasUnifiedMemory] == NO && estimated_model_memory > 1024 * 1024 * 1024) { // 1GB on discrete GPU
+            std::cerr << "⚠️  WARNING CONFIG: Large model on discrete GPU without unified memory may cause issues." << std::endl;
+        }
+    }
+    
+    // VULNERABILITY CHECK 10: Validate batch size constraints
+    if (config.batch_size == 0) {
+        std::cerr << "❌ CRITICAL CONFIG: batch_size cannot be 0" << std::endl;
+        return false;
+    }
+    if (config.batch_size > 64) { // Very large batch sizes can cause memory issues
+        std::cerr << "❌ CRITICAL CONFIG: batch_size (" << config.batch_size << ") unreasonably large (> 64)" << std::endl;
+        return false;
+    }
+    
+    // VULNERABILITY CHECK 11: Check for potential numerical overflow in computations
+    // QKV projection buffer size check
+    uint64_t qkv_buffer_size = (uint64_t)config.batch_size * config.max_sequence_length * config.embedding_dim * 3 * sizeof(uint16_t);
+    if (qkv_buffer_size > MAX_SAFE_BUFFER_SIZE) {
+        std::cerr << "❌ CRITICAL CONFIG: QKV buffer would be too large (" << (qkv_buffer_size / 1024 / 1024) << " MB)" << std::endl;
+        return false;
+    }
+    
+    // Attention weights buffer size check (for attention backward pass)
+    uint64_t attention_weights_size = (uint64_t)config.batch_size * config.num_heads * config.max_sequence_length * config.max_sequence_length * sizeof(uint16_t);
+    if (attention_weights_size > MAX_SAFE_BUFFER_SIZE) {
+        std::cerr << "❌ CRITICAL CONFIG: Attention weights buffer would be too large (" << (attention_weights_size / 1024 / 1024) << " MB)" << std::endl;
+        std::cerr << "    Consider reducing max_sequence_length or num_heads" << std::endl;
+        return false;
+    }
+    
+    // FFN intermediate buffer size check
+    uint64_t ffn_intermediate_size = (uint64_t)config.batch_size * config.max_sequence_length * config.ffn_hidden_dim * sizeof(uint16_t);
+    if (ffn_intermediate_size > MAX_SAFE_BUFFER_SIZE) {
+        std::cerr << "❌ CRITICAL CONFIG: FFN intermediate buffer would be too large (" << (ffn_intermediate_size / 1024 / 1024) << " MB)" << std::endl;
+        return false;
+    }
+    
+    // VULNERABILITY CHECK 12: Check for scale factors that could cause numerical instability
+    float attention_scale = 1.0f / sqrt(float(head_dim));
+    if (attention_scale > 1.0f || attention_scale < 1e-6f) {
+        std::cerr << "❌ CRITICAL CONFIG: Attention scale factor (" << attention_scale << ") is outside safe range [1e-6, 1.0]" << std::endl;
+        std::cerr << "    head_dim: " << head_dim << " (derived from embedding_dim: " << config.embedding_dim << ", num_heads: " << config.num_heads << ")" << std::endl;
+        return false;
+    }
+    
+    // SUCCESS: All checks passed
+    std::cout << "✅ CONFIGURATION VALIDATION: All safety checks passed!" << std::endl;
+    std::cout << "   Model parameters:" << std::endl;
+    std::cout << "     vocab_size: " << config.vocab_size << std::endl;
+    std::cout << "     embedding_dim: " << config.embedding_dim << std::endl;
+    std::cout << "     num_heads: " << config.num_heads << " (head_dim: " << head_dim << ")" << std::endl;
+    std::cout << "     num_layers: " << config.num_layers << std::endl;
+    std::cout << "     ffn_hidden_dim: " << config.ffn_hidden_dim << std::endl;
+    std::cout << "     max_sequence_length: " << config.max_sequence_length << std::endl;
+    std::cout << "   Memory estimates:" << std::endl;
+    std::cout << "     token_embeddings: " << (token_embeddings_size / 1024 / 1024) << " MB" << std::endl;
+    std::cout << "     output_weights: " << (output_weights_size / 1024 / 1024) << " MB" << std::endl;
+    std::cout << "     max_sequence_buffer: " << (max_sequence_buffer_size / 1024 / 1024) << " MB" << std::endl;
+    
+    return true;
+}
+
 bool TransformerModel::initializeMetal() {
     device = MTLCreateSystemDefaultDevice();
     if (!device) {
-        std::cerr << "Failed to create Metal device" << std::endl;
+        std::cerr << "❌ CRITICAL METAL: Failed to create Metal device" << std::endl;
         return false;
     }
     
     commandQueue = [device newCommandQueue];
     if (!commandQueue) {
-        std::cerr << "Failed to create command queue" << std::endl;
+        std::cerr << "❌ CRITICAL METAL: Failed to create command queue" << std::endl;
         return false;
     }
     
@@ -107,12 +321,11 @@ bool TransformerModel::initializeMetal() {
     m_canary_buffer_after = [device newBufferWithLength:canary_buffer_size options:MTLResourceStorageModeShared];
     
     if (!m_canary_buffer_before || !m_canary_buffer_after) {
-        std::cerr << "❌ DIAGNOSTIC: Failed to allocate canary buffers!" << std::endl;
-        // This is a critical failure for diagnostics, but we might allow the model to continue without them
-        // For now, let's return false to indicate an initialization problem.
-        return false; 
+        std::cerr << "❌ CRITICAL METAL: Failed to create canary buffers" << std::endl;
+        // Not a fatal error for the model itself, but diagnostics will be impaired.
+    } else {
+        std::cout << "✓ Canary buffers initialized for diagnostics" << std::endl;
     }
-    std::cout << "✅ DIAGNOSTIC: Canary buffers allocated (" << canary_buffer_size << " bytes each)." << std::endl;
     
     return true;
 }
@@ -2034,96 +2247,95 @@ bool TransformerModel::backwardPass(size_t current_sequence_index) {
                 if (buffers.attention_output[layer]) estimated_usage += [buffers.attention_output[layer] length];
                 if (buffers.ffn_output[layer]) estimated_usage += [buffers.ffn_output[layer] length];
                 if (buffers.attention_Q[layer]) estimated_usage += [buffers.attention_Q[layer] length];
-                if (buffers.attention_K[layer]) estimated_usage += [buffers.attention_K[layer] length];
-                if (buffers.attention_V[layer]) estimated_usage += [buffers.attention_V[layer] length];
             }
             
-            float usage_mb = estimated_usage / (1024.0f * 1024.0f);
-            std::cout << "📊 DIAGNOSTIC GPU: Estimated memory usage: " << usage_mb << " MB" << std::endl;
+            std::cout << "🔍 DIAGNOSTIC: Estimated GPU memory usage: " << (estimated_usage / 1024 / 1024) << " MB" << std::endl;
             
-            // M3 Max has 48GB unified memory, but GPU portion is typically much less
-            // Conservative threshold of 2GB for GPU-specific allocations
-            if (estimated_usage > 2ULL * 1024 * 1024 * 1024) {
-                std::cerr << "⚠️  DIAGNOSTIC GPU: High memory usage (" << usage_mb << " MB) may cause instability" << std::endl;
-                // Don't fail here, just warn
-            }
-        }
-        
-        // ADDITIONAL SAFETY CHECK 4: Command Buffer & Synchronization Validation
-        std::cout << "🔍 DIAGNOSTIC: Checking command buffer state..." << std::endl;
-        
-        // Test if we can create a command buffer (GPU health check)
-        id<MTLCommandBuffer> test_cmd_buffer = [commandQueue commandBuffer];
-        if (!test_cmd_buffer) {
-            std::cerr << "❌ DIAGNOSTIC SYNC: Cannot create command buffer - GPU may be unresponsive" << std::endl;
-            return false;
-        }
-        // Release the test buffer immediately
-        test_cmd_buffer = nil;
-        
-        // ADDITIONAL SAFETY CHECK 5: Platform-Specific M3 Max Considerations
-        std::cout << "🔍 DIAGNOSTIC: M3 Max platform-specific checks..." << std::endl;
-        
-        // Check if we're hitting M3 Max specific limits
-        uint32_t total_threads_dispatched = 0;
-        for (uint32_t layer = 0; layer < config.num_layers; layer++) {
-            // Estimate threads per layer (rough calculation)
-            total_threads_dispatched += num_instances * config.embedding_dim * 4; // Rough estimate for all kernels per layer
-        }
-        
-        // M3 Max has 16384 ALUs, but practical limits are lower
-        if (total_threads_dispatched > 100000) { // Conservative threshold
-            std::cout << "⚠️  DIAGNOSTIC M3: High thread count (" << total_threads_dispatched << ") may stress GPU" << std::endl;
-        }
-        
-        // ADDITIONAL SAFETY CHECK 6: Sequence-Specific Boundary Conditions
-        std::cout << "🔍 DIAGNOSTIC: Checking sequence-specific boundaries..." << std::endl;
-        
-        // Validate the actual sequence length doesn't exceed buffer allocations
-        uint32_t* token_data = static_cast<uint32_t*>([buffers.input_tokens contents]);
-        uint32_t actual_tokens = actual_sequence_length;
-        
-        if (actual_tokens > config.max_sequence_length) {
-            std::cerr << "❌ DIAGNOSTIC SEQUENCE: Actual tokens (" << actual_tokens << ") > max_sequence_length (" << config.max_sequence_length << ")" << std::endl;
-            return false;
-        }
-        
-        // Check for token ID boundary violations
-        for (uint32_t i = 0; i < actual_tokens; i++) {
-            if (token_data[i] >= config.vocab_size) {
-                std::cerr << "❌ DIAGNOSTIC SEQUENCE: Token " << token_data[i] << " at position " << i << " >= vocab_size (" << config.vocab_size << ")" << std::endl;
+            // Check if we're approaching memory limits
+            uint64_t recommended_limit = [device recommendedMaxWorkingSetSize];
+            if (estimated_usage > recommended_limit * 0.8) { // 80% threshold
+                std::cerr << "❌ DIAGNOSTIC MEMORY: GPU memory usage (" << (estimated_usage / 1024 / 1024) 
+                          << " MB) approaching limit (" << (recommended_limit / 1024 / 1024) << " MB)" << std::endl;
                 return false;
             }
         }
         
-        // ADDITIONAL SAFETY CHECK 7: Critical Resource Availability
-        std::cout << "🔍 DIAGNOSTIC: Checking critical resource availability..." << std::endl;
+        // ADDITIONAL SAFETY CHECK 4: Canary Buffer Verification
+        std::cout << "🔍 DIAGNOSTIC: Verifying canary buffers for memory corruption..." << std::endl;
+        if (m_canary_buffer_before && m_canary_buffer_after) {
+            uint32_t* canary_before = static_cast<uint32_t*>([m_canary_buffer_before contents]);
+            uint32_t* canary_after = static_cast<uint32_t*>([m_canary_buffer_after contents]);
+            
+            // Check for known corruption patterns
+            const uint32_t CANARY_PATTERN = 0xDEADBEEF;
+            for (int i = 0; i < 4; i++) { // Check first 4 uint32_t values
+                if (canary_before[i] != CANARY_PATTERN && canary_before[i] != 0) {
+                    std::cerr << "❌ DIAGNOSTIC CANARY: Before-buffer corruption detected at index " << i 
+                              << ". Value: 0x" << std::hex << canary_before[i] << std::dec << std::endl;
+                    return false;
+                }
+                if (canary_after[i] != CANARY_PATTERN && canary_after[i] != 0) {
+                    std::cerr << "❌ DIAGNOSTIC CANARY: After-buffer corruption detected at index " << i 
+                              << ". Value: 0x" << std::hex << canary_after[i] << std::dec << std::endl;
+                    return false;
+                }
+            }
+        }
         
-        // Ensure command queue is still valid
-        if (!commandQueue) {
-            std::cerr << "❌ DIAGNOSTIC RESOURCE: Command queue is null" << std::endl;
+        // ADDITIONAL SAFETY CHECK 5: Parameter Bounds Validation (runtime values)
+        std::cout << "🔍 DIAGNOSTIC: Validating runtime parameter bounds..." << std::endl;
+        
+        // Validate actual sequence length against configuration limits
+        if (actual_sequence_length > config.max_sequence_length) {
+            std::cerr << "❌ DIAGNOSTIC RUNTIME: Actual sequence length (" << actual_sequence_length 
+                      << ") exceeds configured maximum (" << config.max_sequence_length << ")" << std::endl;
             return false;
         }
         
-        // Check if device is still responsive
-        if (!device) {
-            std::cerr << "❌ DIAGNOSTIC RESOURCE: Metal device is null" << std::endl;
+        // Validate batch processing parameters
+        if (actual_batch_size == 0 || actual_batch_size > config.batch_size) {
+            std::cerr << "❌ DIAGNOSTIC RUNTIME: Invalid actual_batch_size: " << actual_batch_size 
+                      << " (config.batch_size: " << config.batch_size << ")" << std::endl;
             return false;
         }
         
-        // Verify all critical kernels are loaded
-        if (!kernels.layer_norm_backward) {
-            std::cerr << "❌ DIAGNOSTIC RESOURCE: layer_norm_backward kernel is null" << std::endl;
-            return false;
-        }
-        if (!kernels.ffn_backward) {
-            std::cerr << "❌ DIAGNOSTIC RESOURCE: ffn_backward kernel is null" << std::endl;
+        // Validate computed values for numerical sanity
+        uint32_t head_dim = config.embedding_dim / config.num_heads;
+        if (head_dim == 0 || head_dim > config.embedding_dim) {
+            std::cerr << "❌ DIAGNOSTIC RUNTIME: Invalid head_dim: " << head_dim << std::endl;
             return false;
         }
         
-        std::cout << "✅ DIAGNOSTIC: All enhanced vulnerability checks passed for sequence " << current_sequence_index << std::endl;
+        // Validate current sequence index bounds
+        if (current_sequence_index >= actual_sequence_length) {
+            std::cerr << "❌ DIAGNOSTIC RUNTIME: current_sequence_index (" << current_sequence_index 
+                      << ") >= actual_sequence_length (" << actual_sequence_length << ")" << std::endl;
+            return false;
+        }
+        
+        // ADDITIONAL SAFETY CHECK 6: Learning Rate & Optimizer State Sanity
+        std::cout << "🔍 DIAGNOSTIC: Checking optimizer state sanity..." << std::endl;
+        
+        float current_lr = calculateLearningRate(optimizer_state.timestep);
+        if (std::isnan(current_lr) || std::isinf(current_lr) || current_lr <= 0.0f || current_lr > 10.0f) {
+            std::cerr << "❌ DIAGNOSTIC OPTIMIZER: Invalid learning rate: " << current_lr 
+                      << " (timestep: " << optimizer_state.timestep << ")" << std::endl;
+            return false;
+        }
+        
+        // Check for numerical issues in optimizer hyperparameters
+        float beta1_power = std::pow(config.beta1, optimizer_state.timestep);
+        float beta2_power = std::pow(config.beta2, optimizer_state.timestep);
+        if (std::isnan(beta1_power) || std::isnan(beta2_power) || beta1_power <= 0.0f || beta2_power <= 0.0f) {
+            std::cerr << "❌ DIAGNOSTIC OPTIMIZER: Invalid beta powers. beta1^t: " << beta1_power 
+                      << ", beta2^t: " << beta2_power << " (timestep: " << optimizer_state.timestep << ")" << std::endl;
+            return false;
+        }
+        
+        std::cout << "✅ DIAGNOSTIC: All additional safety checks passed for sequence " << current_sequence_index << std::endl;
     }
-
+    
+    // === EXISTING LAYER-BY-LAYER BACKWARD PASS ===
     id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
     id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
 
@@ -2168,6 +2380,64 @@ bool TransformerModel::backwardPass(size_t current_sequence_index) {
         }
         
         std::cout << "✅ DIAGNOSTIC OUTPUT_PROJ: Output projection checks passed" << std::endl;
+    }
+    
+    // === FINAL PRE-KERNEL-DISPATCH SAFETY CHECK ===
+    if (m_is_diagnostic_run) {
+        std::cout << "🔍 DIAGNOSTIC: Final pre-kernel-dispatch safety validation..." << std::endl;
+        
+        // Critical kernel availability check
+        if (!kernels.output_projection_backward) {
+            std::cerr << "❌ DIAGNOSTIC KERNEL: output_projection_backward kernel is null" << std::endl;
+            return false;
+        }
+        if (!kernels.layer_norm_backward) {
+            std::cerr << "❌ DIAGNOSTIC KERNEL: layer_norm_backward kernel is null" << std::endl;
+            return false;
+        }
+        if (!kernels.ffn_backward) {
+            std::cerr << "❌ DIAGNOSTIC KERNEL: ffn_backward kernel is null" << std::endl;
+            return false;
+        }
+        
+        // Command buffer and encoder state check
+        if (!commandBuffer) {
+            std::cerr << "❌ DIAGNOSTIC DISPATCH: Command buffer is null" << std::endl;
+            return false;
+        }
+        if (!encoder) {
+            std::cerr << "❌ DIAGNOSTIC DISPATCH: Compute encoder is null" << std::endl;
+            return false;
+        }
+        
+        // Device and command queue health check
+        if (!device) {
+            std::cerr << "❌ DIAGNOSTIC DISPATCH: Metal device is null" << std::endl;
+            return false;
+        }
+        if (!commandQueue) {
+            std::cerr << "❌ DIAGNOSTIC DISPATCH: Command queue is null" << std::endl;
+            return false;
+        }
+        
+        // Final numerical stability check on critical parameters
+        if (config.embedding_dim == 0 || config.num_heads == 0 || config.ffn_hidden_dim == 0) {
+            std::cerr << "❌ DIAGNOSTIC DISPATCH: Critical dimension is zero - this will cause GPU kernel crashes" << std::endl;
+            return false;
+        }
+        
+        // Final memory coherency check - verify critical buffers are still valid
+        NSError* error;
+        if (@available(macOS 11.0, *)) {
+            // Quick validation that our most critical buffers are still accessible
+            if (buffers.final_logits && [buffers.final_logits length] > 0) {
+                // Touch the first byte to ensure it's mapped
+                volatile uint8_t test_byte = *((uint8_t*)[buffers.final_logits contents]);
+                (void)test_byte; // Suppress unused variable warning
+            }
+        }
+        
+        std::cout << "✅ DIAGNOSTIC: Final pre-dispatch checks passed - proceeding with kernel execution" << std::endl;
     }
     
     // Computes: dL/dW_out, dL/db_out, dL/dFinalHidden (input to this layer)
@@ -2719,11 +2989,11 @@ bool TransformerModel::backwardPass(size_t current_sequence_index) {
         }
         
         // Check command queue state
-        if (!commandQueue) {
+    if (!commandQueue) {
             std::cerr << "❌ DIAGNOSTIC GPU: Command queue is null" << std::endl;
-            return false;
-        }
-        
+        return false;
+    }
+    
         // Kernel pipeline state validation
         std::vector<id<MTLComputePipelineState>> critical_kernels = {
             kernels.output_projection_backward,
@@ -2769,7 +3039,7 @@ bool TransformerModel::backwardPass(size_t current_sequence_index) {
         }
     }];
     [commandBuffer commit];
-
+    
     return true;
 }
 
@@ -2846,7 +3116,7 @@ bool TransformerModel::generate(const std::vector<uint32_t>& prompt_tokens,
                                uint32_t top_k) {
     if (prompt_tokens.empty()) {
         std::cerr << "Empty prompt provided for generation" << std::endl;
-        return false;
+        return false; 
     }
     
     if (prompt_tokens.size() >= config.max_sequence_length) {
@@ -3473,15 +3743,15 @@ bool TransformerModel::trainBatch(const std::vector<std::vector<uint32_t>>& inpu
     }
     
     // Report pre-batch validation results
-    uint32_t valid_sequences = input_batch.size() - sequences_at_risk - sequences_too_long - sequences_empty;
+    uint32_t estimated_valid_sequences = input_batch.size() - sequences_at_risk - sequences_too_long - sequences_empty;
     std::cout << "📊 PRE-BATCH REPORT:" << std::endl;
     std::cout << "  Total sequences: " << input_batch.size() << std::endl;
-    std::cout << "  Valid sequences: " << valid_sequences << std::endl;
+    std::cout << "  Valid sequences: " << estimated_valid_sequences << std::endl;
     std::cout << "  At-risk sequences: " << sequences_at_risk << std::endl;
     std::cout << "  Too-long sequences: " << sequences_too_long << std::endl;
     std::cout << "  Empty sequences: " << sequences_empty << std::endl;
     
-    if (valid_sequences == 0) {
+    if (estimated_valid_sequences == 0) {
         std::cerr << "❌ PRE-BATCH: No valid sequences to process" << std::endl;
         return false;
     }

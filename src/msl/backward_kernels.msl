@@ -28,6 +28,12 @@ kernel void layer_norm_backward(
     threadgroup float tg_sum_dL_dnorm_x[1024]; // Assuming embedding_dim <= 1024
     threadgroup float tg_sum_dL_dnorm_x_mul_x_centered[1024];
 
+    // Bounds check for threadgroup arrays
+    if (embedding_dim > 1024) {
+        // ERROR: embedding_dim exceeds threadgroup array capacity
+        return; // Exit early to prevent buffer overflow
+    }
+
     uint base_offset = instance_idx * embedding_dim;
     float x_i = float(input_plus_residual[base_offset + dim_idx]);
     float grad_output_norm_i = float(grad_output_norm[base_offset + dim_idx]);
@@ -188,7 +194,13 @@ kernel void ffn_backward(
     
     // Step 1: Compute dL/dH_act = grad_ffn_output @ W2^T
     // and accumulate dL/dW2 = H_act^T @ grad_ffn_output, dL/db2 = sum(grad_ffn_output)
-    threadgroup float tg_dh_act[512];
+    threadgroup float tg_dh_act[2048];
+    
+    // Bounds check for threadgroup arrays
+    if (ffn_hidden_dim > 2048) {
+        // ERROR: ffn_hidden_dim exceeds threadgroup array capacity
+        return; // Exit early to prevent buffer overflow
+    }
     
     for (uint32_t h = 0; h < ffn_hidden_dim; h++) {
         float dh_act_h = 0.0f;
@@ -214,7 +226,7 @@ kernel void ffn_backward(
     }
     
     // Step 2: Compute dL/dH_lin = dL/dH_act * GELU'(H_lin)
-    threadgroup float tg_dh_lin[512]; 
+    threadgroup float tg_dh_lin[2048]; 
     
     for (uint32_t h = 0; h < ffn_hidden_dim; h++) {
         float h_lin_h = float(h_linear[hidden_offset + h]);
@@ -753,11 +765,22 @@ kernel void scaled_dot_product_attention_inference(
     if (head_idx >= num_heads) return;
 
     uint head_dim = embedding_dim / num_heads;
+    
+    // Division by zero protection
+    if (head_dim == 0) {
+        return; // Exit early to prevent division by zero
+    }
+    
     float scale = rsqrt(float(head_dim));
 
     // --- 1. Update KV Cache with current token's K and V for the current head ---
     uint cache_offset_base_for_head = head_idx * max_sequence_length * head_dim;
     uint cache_offset_for_current_token = cache_offset_base_for_head + current_token_idx * head_dim;
+
+    // Bounds check for KV cache access
+    if (current_token_idx >= max_sequence_length) {
+        return; // Exit early to prevent out-of-bounds KV cache access
+    }
 
     for (uint d = 0; d < head_dim; ++d) {
         uint current_token_k_offset = head_idx * head_dim + d;
@@ -778,10 +801,19 @@ kernel void scaled_dot_product_attention_inference(
     // Allocate on-stack array for scores. Max size is max_sequence_length.
     // This might be too large for stack if max_sequence_length is big; consider threadgroup memory.
     // For now, assuming max_sequence_length is moderate.
-    float attention_scores[512]; // MaxS - TODO: Make this dynamic or use threadgroup shared memory if > ~1024 for safety
-    if (max_sequence_length > 512) { /* Error or use threadgroup memory */ }
+    float attention_scores[1024]; // MaxS - Increased from 512 to 1024 for safety
+    if (max_sequence_length > 1024) { 
+        // ERROR: max_sequence_length exceeds attention_scores array capacity
+        return; // Exit early to prevent buffer overflow
+    }
 
     uint sequence_length_so_far = current_token_idx + 1;
+    
+    // Additional safety check to prevent overflow
+    if (sequence_length_so_far > 1024) {
+        return; // Exit early to prevent buffer overflow
+    }
+    
     float max_score = -INFINITY;
 
     for (uint j = 0; j < sequence_length_so_far; ++j) { // Iterate through tokens in cache (0 to current_token_idx)

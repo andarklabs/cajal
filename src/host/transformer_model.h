@@ -274,8 +274,8 @@ protected:
     std::atomic<bool> m_critical_gpu_error_occurred; // For command buffer error detection
 
 private:
-    // Metal objects
-    // ... existing code ...
+    // Configuration validation
+    bool validateConfiguration();
 
 public:
     TransformerModel(const TransformerConfig& config);
