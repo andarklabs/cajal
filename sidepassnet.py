@@ -256,7 +256,7 @@ def visualize_gradients(model):
     # Print gradient info
     print("\nGradient Magnitudes:")
     
-    print("\nMain Netexplanfwork:")
+    print("\nMain Network:")
     for name, param in main_params:
         if param.grad is not None:
             print(f"{name}: {param.grad.abs().mean().item():.6f}")
