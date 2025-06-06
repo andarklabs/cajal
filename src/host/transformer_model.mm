@@ -152,7 +152,7 @@ bool TransformerModel::validateConfiguration() {
     }
     
     // VULNERABILITY CHECK 4: Stack buffer overflow in attention inference kernel
-    const uint32_t ATTENTION_STACK_BUFFER_SIZE = 512;
+    const uint32_t ATTENTION_STACK_BUFFER_SIZE = 1024; // Fixed: Updated to match MSL kernel
     if (config.max_sequence_length > ATTENTION_STACK_BUFFER_SIZE) {
         std::cerr << "❌ CRITICAL CONFIG: max_sequence_length (" << config.max_sequence_length << ") > MSL attention kernel stack buffer size (" << ATTENTION_STACK_BUFFER_SIZE << ")" << std::endl;
         std::cerr << "    This would cause stack buffer overflow in scaled_dot_product_attention_inference kernel." << std::endl;
@@ -2537,8 +2537,8 @@ bool TransformerModel::backwardPass(size_t current_sequence_index) {
                 }
 
                 // Vulnerability 3 (ffn_backward)
-                // The kernel has tg_dh_act[256] and tg_dh_lin[256]
-                const uint32_t ffn_backward_tg_array_size = 2048;  // Updated from our MSL fix
+                // The kernel has tg_sum_for_dLdX[2048] and tg_sum_for_dLdHact[1024]
+                const uint32_t ffn_backward_tg_array_size = 2048;  // Fixed: Updated threadgroup array to 2048
                 if (config.ffn_hidden_dim > ffn_backward_tg_array_size) {
                     std::cerr << "❌ DIAGNOSTIC (Seq: " << current_sequence_index << ", Layer: " << layer << "): Potential OOB in ffn_backward. config.ffn_hidden_dim (" << config.ffn_hidden_dim << ") > threadgroup array size (" << ffn_backward_tg_array_size << ")." << std::endl;
                     return false;
@@ -2550,13 +2550,13 @@ bool TransformerModel::backwardPass(size_t current_sequence_index) {
                     return false;
                 }
 
-                // Vulnerability 5 (scaled_dot_product_attention_inference stack buffer overflow)
-                // The inference kernel declares: float attention_scores[512];
-                const uint32_t attention_scores_stack_size = 512;
-                if (actual_sequence_length > attention_scores_stack_size) {
-                    std::cerr << "❌ DIAGNOSTIC (Seq: " << current_sequence_index << ", Layer: " << layer << "): Potential stack buffer overflow in scaled_dot_product_attention_inference. sequence_length (" << actual_sequence_length << ") > stack array size (" << attention_scores_stack_size << ")." << std::endl;
-                    return false;
-                }
+                        // Vulnerability 5 (scaled_dot_product_attention_inference stack buffer overflow)
+        // The inference kernel declares: float scores_row[1024];
+        const uint32_t attention_scores_stack_size = 1024; // Fixed: Updated from 512 to 1024
+        if (actual_sequence_length > attention_scores_stack_size) {
+            std::cerr << "❌ DIAGNOSTIC (Seq: " << current_sequence_index << ", Layer: " << layer << "): Potential stack buffer overflow in scaled_dot_product_attention_inference. sequence_length (" << actual_sequence_length << ") > stack array size (" << attention_scores_stack_size << ")." << std::endl;
+            return false;
+        }
 
                 // Vulnerability 6 (Division by zero checks)
                 if (config.num_heads == 0) {
@@ -4061,4 +4061,48 @@ bool TransformerModel::trainBatch(const std::vector<std::vector<uint32_t>>& inpu
               << "/" << input_batch.size() << ", avg loss: " << avg_loss << std::endl;
     
     return true;
+}
+
+// Chatbot interface - returns logits for external sampling
+std::vector<float> TransformerModel::generateNext(const std::vector<uint32_t>& context) {
+    std::vector<float> output_logits;
+    
+    if (context.empty()) {
+        std::cerr << "❌ Empty context provided for chatbot generation" << std::endl;
+        return output_logits; // Return empty vector
+    }
+    
+    if (context.size() > config.max_sequence_length) {
+        std::cerr << "❌ Context too long for chatbot generation" << std::endl;
+        return output_logits; // Return empty vector
+    }
+    
+    try {
+        // Use the standard forward pass to get logits
+        if (!forward(context, output_logits)) {
+            std::cerr << "❌ Forward pass failed in chatbot generation" << std::endl;
+            return std::vector<float>(); // Return empty vector on failure
+        }
+        
+        // Extract logits for the last position (next token prediction)
+        if (output_logits.size() < config.vocab_size) {
+            std::cerr << "❌ Invalid output logits size in chatbot generation" << std::endl;
+            return std::vector<float>(); // Return empty vector
+        }
+        
+        // Get logits for the last position
+        size_t last_position_offset = (context.size() - 1) * config.vocab_size;
+        
+        // Extract and return the last position logits
+        std::vector<float> next_token_logits(
+            output_logits.begin() + last_position_offset,
+            output_logits.begin() + last_position_offset + config.vocab_size
+        );
+        
+        return next_token_logits;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "❌ Exception in chatbot generation: " << e.what() << std::endl;
+        return std::vector<float>(); // Return empty vector on exception
+    }
 }

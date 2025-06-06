@@ -308,6 +308,9 @@ public:
                      uint32_t& next_token,
                      float temperature = 1.0f);
     
+    // Chatbot interface - returns logits for external sampling
+    std::vector<float> generateNext(const std::vector<uint32_t>& context);
+    
     std::string generateText(const std::string& prompt,
                            size_t max_tokens = 100,
                            float temperature = 1.0f);

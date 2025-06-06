@@ -1,0 +1,79 @@
+# MSL Transformer Chatbot Makefile
+# For Apple M3 Max with Metal support
+
+CXX = clang++
+CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
+
+# Metal and Objective-C++ flags
+OBJCXXFLAGS = -fobjc-arc -fmodules
+FRAMEWORKS = -framework Metal -framework Foundation -framework CoreGraphics
+
+# Source files
+SOURCES = src/host/chatbot.mm src/host/transformer_model.mm
+OBJECTS = $(SOURCES:.mm=.o)
+TARGET = msl_chatbot
+
+# Include directories
+INCLUDES = -I src/host
+
+# MSL shader files (for reference)
+MSL_SHADERS = src/msl/forward_kernels.msl src/msl/training_kernels.msl src/msl/backward_kernels.msl
+
+.PHONY: all clean run test
+
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	@echo "🔗 Linking MSL Transformer Chatbot..."
+	$(CXX) $(CXXFLAGS) $(OBJCXXFLAGS) $(FRAMEWORKS) $^ -o $@
+	@echo "✅ Chatbot compiled successfully!"
+	@echo "🤖 Run with: ./$(TARGET)"
+
+%.o: %.mm
+	@echo "🔨 Compiling $<..."
+	$(CXX) $(CXXFLAGS) $(OBJCXXFLAGS) $(INCLUDES) -c $< -o $@
+
+clean:
+	@echo "🧹 Cleaning build files..."
+	rm -f $(OBJECTS) $(TARGET)
+	@echo "✅ Clean complete"
+
+run: $(TARGET)
+	@echo "🚀 Starting MSL Transformer Chatbot..."
+	./$(TARGET)
+
+# Quick test compile
+test:
+	@echo "🧪 Testing compilation..."
+	$(CXX) $(CXXFLAGS) $(OBJCXXFLAGS) $(FRAMEWORKS) $(INCLUDES) -fsyntax-only $(SOURCES)
+	@echo "✅ Compilation test passed!"
+
+# Debug build
+debug: CXXFLAGS += -g -DDEBUG
+debug: $(TARGET)
+
+# Show build info
+info:
+	@echo "📋 MSL Transformer Chatbot Build Info:"
+	@echo "   Compiler: $(CXX)"
+	@echo "   Flags: $(CXXFLAGS) $(OBJCXXFLAGS)"
+	@echo "   Frameworks: $(FRAMEWORKS)"
+	@echo "   Sources: $(SOURCES)"
+	@echo "   Target: $(TARGET)"
+	@echo "   MSL Shaders: $(MSL_SHADERS)"
+
+help:
+	@echo "🤖 MSL Transformer Chatbot Makefile"
+	@echo ""
+	@echo "Available targets:"
+	@echo "  all     - Build the chatbot (default)"
+	@echo "  clean   - Remove build files" 
+	@echo "  run     - Build and run the chatbot"
+	@echo "  test    - Test compilation without linking"
+	@echo "  debug   - Build with debug symbols"
+	@echo "  info    - Show build configuration"
+	@echo "  help    - Show this help"
+	@echo ""
+	@echo "Example usage:"
+	@echo "  make run          # Build and start chatbot"
+	@echo "  make debug run    # Build debug version and run" 
