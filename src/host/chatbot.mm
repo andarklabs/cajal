@@ -51,10 +51,17 @@ public:
         chatbot_config.num_layers = 6;
         chatbot_config.ffn_hidden_dim = 2048;
         chatbot_config.max_sequence_length = 512;
+        chatbot_config.batch_size = 1;  // Use batch size 1 for chatbot
         chatbot_config.learning_rate = 0.001f;
         
         try {
             model = std::make_unique<TransformerModel>(chatbot_config);
+            
+            std::cout << "🔧 Initializing MSL Transformer..." << std::endl;
+            if (!model->initialize()) {
+                throw std::runtime_error("Failed to initialize MSL Transformer model");
+            }
+            
             std::cout << "✅ MSL Transformer loaded successfully!\n";
             std::cout << "📊 Model: " << model->getParameterCount() << " parameters\n";
             std::cout << "💾 Memory: " << model->getMemoryUsage() << " MB\n\n";

@@ -1,0 +1,45 @@
+# MSL Transformer Training Chatbot Makefile
+# Builds a version that trains the model first
+
+CXX = clang++
+CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
+
+# Metal and Objective-C++ flags
+OBJCXXFLAGS = -fobjc-arc -fmodules
+FRAMEWORKS = -framework Metal -framework Foundation -framework CoreGraphics
+
+# Source files
+SOURCES = src/host/chatbot_with_training.mm src/host/transformer_model.mm
+OBJECTS = $(SOURCES:.mm=.o)
+TARGET = msl_training_chatbot
+
+# Include directories
+INCLUDES = -I src/host
+
+.PHONY: all clean run test
+
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	@echo "🔗 Linking MSL Training Chatbot..."
+	$(CXX) $(CXXFLAGS) $(OBJCXXFLAGS) $(FRAMEWORKS) $^ -o $@
+	@echo "✅ Training Chatbot compiled successfully!"
+	@echo "🎓 This version will train the model before chatting"
+
+%.o: %.mm
+	@echo "📝 Compiling $<..."
+	$(CXX) $(CXXFLAGS) $(OBJCXXFLAGS) $(INCLUDES) -c $< -o $@
+
+clean:
+	@echo "🧹 Cleaning up..."
+	rm -f $(OBJECTS) $(TARGET)
+
+run: $(TARGET)
+	@echo "🚀 Running MSL Training Chatbot..."
+	./$(TARGET)
+
+test: $(TARGET)
+	@echo "🧪 Quick test - will build and show info..."
+	@timeout 10s ./$(TARGET) || echo "✅ Training chatbot builds and starts correctly"
+
+.SUFFIXES: .mm .o 

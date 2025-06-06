@@ -3098,15 +3098,20 @@ size_t TransformerModel::getParameterCount() const {
 }
 
 size_t TransformerModel::getMemoryUsage() const {
-    // Rough estimate of memory usage
+    // Rough estimate of memory usage  
     size_t params = getParameterCount();
     size_t param_memory = params * 2; // Half precision weights
     
-    size_t buffer_memory = config.batch_size * config.max_sequence_length * config.embedding_dim * 2; // Embeddings
-    buffer_memory += config.num_layers * buffer_memory * 6; // Intermediate buffers per layer
-    buffer_memory += config.batch_size * config.max_sequence_length * config.vocab_size * 4; // Logits
+    // Fixed memory calculation - was exponentially wrong before
+    size_t embeddings_memory = config.batch_size * config.max_sequence_length * config.embedding_dim * 2;
+    size_t intermediate_per_layer = config.batch_size * config.max_sequence_length * config.embedding_dim * 2 * 6; // 6 buffers per layer
+    size_t layer_memory = config.num_layers * intermediate_per_layer;
+    size_t logits_memory = config.batch_size * config.max_sequence_length * config.vocab_size * 4;
     
-    return param_memory + buffer_memory;
+    size_t total_memory = param_memory + embeddings_memory + layer_memory + logits_memory;
+    
+    // Convert to MB for display
+    return total_memory / (1024 * 1024);
 }
 
 bool TransformerModel::generate(const std::vector<uint32_t>& prompt_tokens,
@@ -4104,5 +4109,334 @@ std::vector<float> TransformerModel::generateNext(const std::vector<uint32_t>& c
     } catch (const std::exception& e) {
         std::cerr << "❌ Exception in chatbot generation: " << e.what() << std::endl;
         return std::vector<float>(); // Return empty vector on exception
+    }
+}
+
+// Model save/load functionality
+bool TransformerModel::saveWeights(const std::string& filepath) {
+    std::cout << "💾 Saving model weights to: " << filepath << std::endl;
+    
+    std::ofstream file(filepath, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "❌ Failed to open file for writing: " << filepath << std::endl;
+        return false;
+    }
+    
+    try {
+        // Write header information
+        file.write("MSL_TRANSFORMER_V1", 16);
+        file.write(reinterpret_cast<const char*>(&config), sizeof(TransformerConfig));
+        
+        // Save token embeddings
+        size_t embedding_size = config.vocab_size * config.embedding_dim * sizeof(uint16_t);
+        const void* embedding_data = [weights.token_embeddings contents];
+        file.write(reinterpret_cast<const char*>(&embedding_size), sizeof(size_t));
+        file.write(reinterpret_cast<const char*>(embedding_data), embedding_size);
+        
+        // Save output weights (if not tied to embeddings)
+        size_t output_size = config.embedding_dim * config.vocab_size * sizeof(uint16_t);
+        const void* output_data = [weights.output_weights contents];
+        file.write(reinterpret_cast<const char*>(&output_size), sizeof(size_t));
+        file.write(reinterpret_cast<const char*>(output_data), output_size);
+        
+        // Save output bias
+        size_t output_bias_size = config.vocab_size * sizeof(float);
+        const void* output_bias_data = [weights.output_bias contents];
+        file.write(reinterpret_cast<const char*>(&output_bias_size), sizeof(size_t));
+        file.write(reinterpret_cast<const char*>(output_bias_data), output_bias_size);
+        
+        // Save final layer norm parameters
+        size_t ln_size = config.embedding_dim * sizeof(float);
+        const void* final_ln_gamma_data = [weights.final_ln_gamma contents];
+        const void* final_ln_beta_data = [weights.final_ln_beta contents];
+        file.write(reinterpret_cast<const char*>(&ln_size), sizeof(size_t));
+        file.write(reinterpret_cast<const char*>(final_ln_gamma_data), ln_size);
+        file.write(reinterpret_cast<const char*>(&ln_size), sizeof(size_t));
+        file.write(reinterpret_cast<const char*>(final_ln_beta_data), ln_size);
+        
+        // Save transformer blocks
+        for (uint32_t layer = 0; layer < config.num_layers; layer++) {
+            const auto& block = weights.blocks[layer];
+            
+            // QKV weights and bias
+            size_t qkv_weights_size = config.embedding_dim * config.embedding_dim * 3 * sizeof(uint16_t);
+            size_t qkv_bias_size = config.embedding_dim * 3 * sizeof(float);
+            
+            const void* qkv_weights_data = [block.qkv_weights contents];
+            const void* qkv_bias_data = [block.qkv_bias contents];
+            
+            file.write(reinterpret_cast<const char*>(&qkv_weights_size), sizeof(size_t));
+            file.write(reinterpret_cast<const char*>(qkv_weights_data), qkv_weights_size);
+            file.write(reinterpret_cast<const char*>(&qkv_bias_size), sizeof(size_t));
+            file.write(reinterpret_cast<const char*>(qkv_bias_data), qkv_bias_size);
+            
+            // Attention output weights and bias
+            size_t attn_out_weights_size = config.embedding_dim * config.embedding_dim * sizeof(uint16_t);
+            size_t attn_out_bias_size = config.embedding_dim * sizeof(float);
+            
+            const void* attn_out_weights_data = [block.attention_output_weights contents];
+            const void* attn_out_bias_data = [block.attention_output_bias contents];
+            
+            file.write(reinterpret_cast<const char*>(&attn_out_weights_size), sizeof(size_t));
+            file.write(reinterpret_cast<const char*>(attn_out_weights_data), attn_out_weights_size);
+            file.write(reinterpret_cast<const char*>(&attn_out_bias_size), sizeof(size_t));
+            file.write(reinterpret_cast<const char*>(attn_out_bias_data), attn_out_bias_size);
+            
+            // Layer norm 1
+            const void* ln1_gamma_data = [block.ln1_gamma contents];
+            const void* ln1_beta_data = [block.ln1_beta contents];
+            
+            file.write(reinterpret_cast<const char*>(&ln_size), sizeof(size_t));
+            file.write(reinterpret_cast<const char*>(ln1_gamma_data), ln_size);
+            file.write(reinterpret_cast<const char*>(&ln_size), sizeof(size_t));
+            file.write(reinterpret_cast<const char*>(ln1_beta_data), ln_size);
+            
+            // FFN weights and biases
+            size_t ffn_w1_size = config.embedding_dim * config.ffn_hidden_dim * sizeof(uint16_t);
+            size_t ffn_b1_size = config.ffn_hidden_dim * sizeof(float);
+            size_t ffn_w2_size = config.ffn_hidden_dim * config.embedding_dim * sizeof(uint16_t);
+            size_t ffn_b2_size = config.embedding_dim * sizeof(float);
+            
+            const void* ffn_w1_data = [block.ffn_w1 contents];
+            const void* ffn_b1_data = [block.ffn_b1 contents];
+            const void* ffn_w2_data = [block.ffn_w2 contents];
+            const void* ffn_b2_data = [block.ffn_b2 contents];
+            
+            file.write(reinterpret_cast<const char*>(&ffn_w1_size), sizeof(size_t));
+            file.write(reinterpret_cast<const char*>(ffn_w1_data), ffn_w1_size);
+            file.write(reinterpret_cast<const char*>(&ffn_b1_size), sizeof(size_t));
+            file.write(reinterpret_cast<const char*>(ffn_b1_data), ffn_b1_size);
+            file.write(reinterpret_cast<const char*>(&ffn_w2_size), sizeof(size_t));
+            file.write(reinterpret_cast<const char*>(ffn_w2_data), ffn_w2_size);
+            file.write(reinterpret_cast<const char*>(&ffn_b2_size), sizeof(size_t));
+            file.write(reinterpret_cast<const char*>(ffn_b2_data), ffn_b2_size);
+            
+            // Layer norm 2
+            const void* ln2_gamma_data = [block.ln2_gamma contents];
+            const void* ln2_beta_data = [block.ln2_beta contents];
+            
+            file.write(reinterpret_cast<const char*>(&ln_size), sizeof(size_t));
+            file.write(reinterpret_cast<const char*>(ln2_gamma_data), ln_size);
+            file.write(reinterpret_cast<const char*>(&ln_size), sizeof(size_t));
+            file.write(reinterpret_cast<const char*>(ln2_beta_data), ln_size);
+        }
+        
+        file.close();
+        std::cout << "✅ Model weights saved successfully" << std::endl;
+        return true;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "❌ Error saving weights: " << e.what() << std::endl;
+        file.close();
+        return false;
+    }
+}
+
+bool TransformerModel::loadWeights(const std::string& filepath) {
+    std::cout << "📂 Loading model weights from: " << filepath << std::endl;
+    
+    std::ifstream file(filepath, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "❌ Failed to open file for reading: " << filepath << std::endl;
+        return false;
+    }
+    
+    try {
+        // Read and verify header
+        char header[17] = {0};
+        file.read(header, 16);
+        if (std::string(header) != "MSL_TRANSFORMER_V1") {
+            std::cerr << "❌ Invalid file format or version" << std::endl;
+            return false;
+        }
+        
+        // Read configuration
+        TransformerConfig saved_config;
+        file.read(reinterpret_cast<char*>(&saved_config), sizeof(TransformerConfig));
+        
+        // Verify configuration matches
+        if (saved_config.vocab_size != config.vocab_size ||
+            saved_config.embedding_dim != config.embedding_dim ||
+            saved_config.num_layers != config.num_layers ||
+            saved_config.num_heads != config.num_heads ||
+            saved_config.ffn_hidden_dim != config.ffn_hidden_dim) {
+            std::cerr << "❌ Configuration mismatch between saved model and current config" << std::endl;
+            return false;
+        }
+        
+        // Load token embeddings
+        size_t embedding_size;
+        file.read(reinterpret_cast<char*>(&embedding_size), sizeof(size_t));
+        void* embedding_data = [weights.token_embeddings contents];
+        file.read(reinterpret_cast<char*>(embedding_data), embedding_size);
+        
+        // Load output weights
+        size_t output_size;
+        file.read(reinterpret_cast<char*>(&output_size), sizeof(size_t));
+        void* output_data = [weights.output_weights contents];
+        file.read(reinterpret_cast<char*>(output_data), output_size);
+        
+        // Load output bias
+        size_t output_bias_size;
+        file.read(reinterpret_cast<char*>(&output_bias_size), sizeof(size_t));
+        void* output_bias_data = [weights.output_bias contents];
+        file.read(reinterpret_cast<char*>(output_bias_data), output_bias_size);
+        
+        // Load final layer norm parameters
+        size_t ln_size;
+        file.read(reinterpret_cast<char*>(&ln_size), sizeof(size_t));
+        void* final_ln_gamma_data = [weights.final_ln_gamma contents];
+        file.read(reinterpret_cast<char*>(final_ln_gamma_data), ln_size);
+        
+        file.read(reinterpret_cast<char*>(&ln_size), sizeof(size_t));
+        void* final_ln_beta_data = [weights.final_ln_beta contents];
+        file.read(reinterpret_cast<char*>(final_ln_beta_data), ln_size);
+        
+        // Load transformer blocks
+        for (uint32_t layer = 0; layer < config.num_layers; layer++) {
+            auto& block = weights.blocks[layer];
+            
+            // QKV weights and bias
+            size_t qkv_weights_size, qkv_bias_size;
+            file.read(reinterpret_cast<char*>(&qkv_weights_size), sizeof(size_t));
+            void* qkv_weights_data = [block.qkv_weights contents];
+            file.read(reinterpret_cast<char*>(qkv_weights_data), qkv_weights_size);
+            
+            file.read(reinterpret_cast<char*>(&qkv_bias_size), sizeof(size_t));
+            void* qkv_bias_data = [block.qkv_bias contents];
+            file.read(reinterpret_cast<char*>(qkv_bias_data), qkv_bias_size);
+            
+            // Attention output weights and bias
+            size_t attn_out_weights_size, attn_out_bias_size;
+            file.read(reinterpret_cast<char*>(&attn_out_weights_size), sizeof(size_t));
+            void* attn_out_weights_data = [block.attention_output_weights contents];
+            file.read(reinterpret_cast<char*>(attn_out_weights_data), attn_out_weights_size);
+            
+            file.read(reinterpret_cast<char*>(&attn_out_bias_size), sizeof(size_t));
+            void* attn_out_bias_data = [block.attention_output_bias contents];
+            file.read(reinterpret_cast<char*>(attn_out_bias_data), attn_out_bias_size);
+            
+            // Layer norm 1
+            file.read(reinterpret_cast<char*>(&ln_size), sizeof(size_t));
+            void* ln1_gamma_data = [block.ln1_gamma contents];
+            file.read(reinterpret_cast<char*>(ln1_gamma_data), ln_size);
+            
+            file.read(reinterpret_cast<char*>(&ln_size), sizeof(size_t));
+            void* ln1_beta_data = [block.ln1_beta contents];
+            file.read(reinterpret_cast<char*>(ln1_beta_data), ln_size);
+            
+            // FFN weights and biases
+            size_t ffn_w1_size, ffn_b1_size, ffn_w2_size, ffn_b2_size;
+            
+            file.read(reinterpret_cast<char*>(&ffn_w1_size), sizeof(size_t));
+            void* ffn_w1_data = [block.ffn_w1 contents];
+            file.read(reinterpret_cast<char*>(ffn_w1_data), ffn_w1_size);
+            
+            file.read(reinterpret_cast<char*>(&ffn_b1_size), sizeof(size_t));
+            void* ffn_b1_data = [block.ffn_b1 contents];
+            file.read(reinterpret_cast<char*>(ffn_b1_data), ffn_b1_size);
+            
+            file.read(reinterpret_cast<char*>(&ffn_w2_size), sizeof(size_t));
+            void* ffn_w2_data = [block.ffn_w2 contents];
+            file.read(reinterpret_cast<char*>(ffn_w2_data), ffn_w2_size);
+            
+            file.read(reinterpret_cast<char*>(&ffn_b2_size), sizeof(size_t));
+            void* ffn_b2_data = [block.ffn_b2 contents];
+            file.read(reinterpret_cast<char*>(ffn_b2_data), ffn_b2_size);
+            
+            // Layer norm 2
+            file.read(reinterpret_cast<char*>(&ln_size), sizeof(size_t));
+            void* ln2_gamma_data = [block.ln2_gamma contents];
+            file.read(reinterpret_cast<char*>(ln2_gamma_data), ln_size);
+            
+            file.read(reinterpret_cast<char*>(&ln_size), sizeof(size_t));
+            void* ln2_beta_data = [block.ln2_beta contents];
+            file.read(reinterpret_cast<char*>(ln2_beta_data), ln_size);
+        }
+        
+        file.close();
+        std::cout << "✅ Model weights loaded successfully" << std::endl;
+        return true;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "❌ Error loading weights: " << e.what() << std::endl;
+        file.close();
+        return false;
+    }
+}
+
+bool TransformerModel::saveCheckpoint(const std::string& filepath, uint32_t epoch, uint32_t step) {
+    std::cout << "💾 Saving checkpoint (epoch " << epoch << ", step " << step << ") to: " << filepath << std::endl;
+    
+    std::ofstream file(filepath, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "❌ Failed to open file for checkpoint writing: " << filepath << std::endl;
+        return false;
+    }
+    
+    try {
+        // Write checkpoint header
+        file.write("MSL_CHECKPOINT_V1", 16);
+        file.write(reinterpret_cast<const char*>(&epoch), sizeof(uint32_t));
+        file.write(reinterpret_cast<const char*>(&step), sizeof(uint32_t));
+        file.write(reinterpret_cast<const char*>(&optimizer_state.timestep), sizeof(uint32_t));
+        file.write(reinterpret_cast<const char*>(&optimizer_state.current_learning_rate), sizeof(float));
+        
+        // Save model weights (reuse saveWeights logic)
+        if (!saveWeights(filepath + ".weights")) {
+            std::cerr << "❌ Failed to save weights in checkpoint" << std::endl;
+            return false;
+        }
+        
+        file.close();
+        std::cout << "✅ Checkpoint saved successfully" << std::endl;
+        return true;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "❌ Error saving checkpoint: " << e.what() << std::endl;
+        file.close();
+        return false;
+    }
+}
+
+bool TransformerModel::loadCheckpoint(const std::string& filepath, uint32_t& epoch, uint32_t& step) {
+    std::cout << "📂 Loading checkpoint from: " << filepath << std::endl;
+    
+    std::ifstream file(filepath, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "❌ Failed to open checkpoint file for reading: " << filepath << std::endl;
+        return false;
+    }
+    
+    try {
+        // Read and verify header
+        char header[17] = {0};
+        file.read(header, 16);
+        if (std::string(header) != "MSL_CHECKPOINT_V1") {
+            std::cerr << "❌ Invalid checkpoint format or version" << std::endl;
+            return false;
+        }
+        
+        // Read training state
+        file.read(reinterpret_cast<char*>(&epoch), sizeof(uint32_t));
+        file.read(reinterpret_cast<char*>(&step), sizeof(uint32_t));
+        file.read(reinterpret_cast<char*>(&optimizer_state.timestep), sizeof(uint32_t));
+        file.read(reinterpret_cast<char*>(&optimizer_state.current_learning_rate), sizeof(float));
+        
+        file.close();
+        
+        // Load model weights
+        if (!loadWeights(filepath + ".weights")) {
+            std::cerr << "❌ Failed to load weights from checkpoint" << std::endl;
+            return false;
+        }
+        
+        std::cout << "✅ Checkpoint loaded successfully (epoch " << epoch << ", step " << step << ")" << std::endl;
+        return true;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "❌ Error loading checkpoint: " << e.what() << std::endl;
+        file.close();
+        return false;
     }
 }
