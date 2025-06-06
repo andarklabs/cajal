@@ -19,9 +19,11 @@ kernel void layer_norm_backward(
     constant uint& batch_size [[buffer(8)]],
     constant uint& seq_len [[buffer(9)]],
     constant uint& embedding_dim [[buffer(10)]],
-    uint instance_idx [[threadgroup_position_in_grid]], // One threadgroup per instance (token)
-    uint dim_idx [[thread_position_in_threadgroup]]     // Thread index within the group (0 to embedding_dim-1)
+    uint2 threadgroup_id [[threadgroup_position_in_grid]], // Threadgroup position in 2D grid
+    uint2 thread_id [[thread_position_in_threadgroup]]     // Thread position within threadgroup
 ) {
+    uint instance_idx = threadgroup_id.x;  // Which instance (batch*seq position)
+    uint dim_idx = thread_id.y;            // Which embedding dimension (0 to embedding_dim-1)
     if (instance_idx >= batch_size * seq_len || dim_idx >= embedding_dim) return;
 
     // Threadgroup arrays for manual reduction.
@@ -238,69 +240,68 @@ kernel void ffn_backward(
         atomic_fetch_add_explicit(&grad_b2[e_idx], grad_out_val, memory_order_relaxed);
     }
 
-    // dL/dH_act[instance, h] = sum_e (grad_ffn_output[instance, e] * w2[h,e])
-    // Each thread (instance_idx, h_idx, e_idx) calculates one term of this sum.
-    // This requires a reduction over 'e_idx'.
-    // Using threadgroup memory for reduction:
-    threadgroup float tg_sum_for_dLdHact[1024]; // Max E, ensure embedding_dim <= 1024 for this tg array
-
-    if (embedding_dim > 1024) { /* Error or use device memory reduction */ return; }
-
+    // 🔧 INTERIM SOLUTION: Fix threadgroup reductions with proper initialization
+    // This fixes the immediate NaN bug while we design the full atomic solution
+    
+    // 🔧 OPTIMIZED: Each thread initializes only its own elements
+    threadgroup float tg_sum_for_dLdHact[1024];
+    if (e_idx < 1024) { // Only threads within bounds initialize
+        tg_sum_for_dLdHact[e_idx] = 0.0f;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    // Now the original reduction algorithm will work correctly
+    if (embedding_dim > 1024) return; // Safety check
+    
     if (h_idx < ffn_hidden_dim && e_idx < embedding_dim) {
-         float grad_out_val = float(grad_ffn_output[input_base + e_idx]);
-         float w2_val = float(w2[h_idx * embedding_dim + e_idx]);
-         tg_sum_for_dLdHact[e_idx] = grad_out_val * w2_val;
-    } else if (e_idx < embedding_dim) { // if h_idx is out of bounds but e_idx is valid for reduction
-         tg_sum_for_dLdHact[e_idx] = 0.0f;
+        float grad_out_val = float(grad_ffn_output[input_base + e_idx]);
+        float w2_val = float(w2[h_idx * embedding_dim + e_idx]);
+        tg_sum_for_dLdHact[e_idx] = grad_out_val * w2_val;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     float dL_dH_act_h = 0.0f;
-    if (h_idx < ffn_hidden_dim) { // Only relevant h_idx participate in reduction
-        // Reduction over e_idx (tg_sum_for_dLdHact was populated by e_idx threads)
-        // A thread with e_idx = 0 in the threadgroup can sum up.
-        // Or a proper parallel reduction:
+    if (h_idx < ffn_hidden_dim) {
+        // Safe reduction with zero-initialized memory
         for (uint s = embedding_dim / 2; s > 0; s >>= 1) {
-            if (e_idx < s) {
+            if (e_idx < s && (e_idx + s) < 1024) { // Bounds check
                 tg_sum_for_dLdHact[e_idx] += tg_sum_for_dLdHact[e_idx + s];
             }
             threadgroup_barrier(mem_flags::mem_threadgroup);
         }
-        if (e_idx == 0) { // Thread e_idx=0 now holds the sum for this instance_idx, h_idx
+        if (e_idx == 0) {
             dL_dH_act_h = tg_sum_for_dLdHact[0];
         }
     }
-    // Broadcast dL_dH_act_h from e_idx=0 to other e_idx threads if needed, or ensure it's used by e_idx=0
-    // The value dL_dH_act_h is specific to (instance_idx, h_idx).
-    // If e_idx==0 computed it, other e_idx threads in the same h_idx group need it.
-    // This can be done by writing it to another threadgroup variable.
+    
+    // Simple broadcast using threadgroup memory
     threadgroup float tg_dL_dH_act_h_val;
     if (e_idx == 0 && h_idx < ffn_hidden_dim) {
         tg_dL_dH_act_h_val = dL_dH_act_h;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (h_idx < ffn_hidden_dim) { // All e_idx threads for this h_idx read the broadcasted value
+    if (h_idx < ffn_hidden_dim) {
         dL_dH_act_h = tg_dL_dH_act_h_val;
     }
 
 
     // --- Step 2: Compute dL/dH_lin ---
     // dL/dH_lin[instance, h] = dL/dH_act[instance, h] * GELU'(H_lin[instance,h])
-    // This is an element-wise product. Each thread (instance_idx, h_idx, e_idx=0 perhaps) can do this.
     float dL_dH_lin_h = 0.0f;
-    if (h_idx < ffn_hidden_dim && e_idx == 0) { // Let thread e_idx=0 compute this for its h_idx
+    if (h_idx < ffn_hidden_dim && e_idx == 0) { // Let thread e_idx=0 compute this
         float h_lin_val = float(h_linear[hidden_base + h_idx]);
         float gelu_deriv_val = gelu_derivative(h_lin_val);
         dL_dH_lin_h = dL_dH_act_h * gelu_deriv_val;
     }
-    // Broadcast dL_dH_lin_h similarly if other e_idx threads need it for W1/b1 updates
+    
+    // Broadcast dL_dH_lin_h to other threads
     threadgroup float tg_dL_dH_lin_h_val;
-     if (e_idx == 0 && h_idx < ffn_hidden_dim) {
+    if (e_idx == 0 && h_idx < ffn_hidden_dim) {
         tg_dL_dH_lin_h_val = dL_dH_lin_h;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (h_idx < ffn_hidden_dim) { // All e_idx threads for this h_idx read it
-        dL_dH_lin_h = tg_dL_dH_lin_h_val; // This value is for (instance_idx, h_idx)
+    if (h_idx < ffn_hidden_dim) {
+        dL_dH_lin_h = tg_dL_dH_lin_h_val;
     }
 
 
@@ -320,31 +321,33 @@ kernel void ffn_backward(
     }
 
     // dL/dX[instance,e] = sum_h (dL/dH_lin[instance,h] * w1[e,h])
-    // Each thread (instance_idx, h_idx, e_idx) calculates one term of this sum.
-    // Requires reduction over 'h_idx'.
+    // 🔧 FIXED: Zero-initialize threadgroup array for safe reduction
     threadgroup float tg_sum_for_dLdX[2048]; // Max H, ensure ffn_hidden_dim <= 2048
+    
+    // 🔧 OPTIMIZED: Each thread initializes only its own elements  
+    if (h_idx < 2048) { // Only threads within bounds initialize
+        tg_sum_for_dLdX[h_idx] = 0.0f;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    if (ffn_hidden_dim > 2048) { /* Error or use device memory reduction */ return; }
+    if (ffn_hidden_dim > 2048) return; // Safety check
 
     if (e_idx < embedding_dim && h_idx < ffn_hidden_dim) {
-        // dL_dH_lin_h is for (instance_idx, h_idx)
         float w1_val = float(w1[e_idx * ffn_hidden_dim + h_idx]);
         tg_sum_for_dLdX[h_idx] = dL_dH_lin_h * w1_val;
-    } else if (h_idx < ffn_hidden_dim) { // if e_idx is out of bounds but h_idx is valid for reduction
-        tg_sum_for_dLdX[h_idx] = 0.0f;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     
     float dL_dX_e = 0.0f;
-    if (e_idx < embedding_dim) { // Only relevant e_idx participate
-        // Reduction over h_idx
+    if (e_idx < embedding_dim) {
+        // Safe reduction with bounds checking
         for (uint s = ffn_hidden_dim / 2; s > 0; s >>= 1) {
-            if (h_idx < s) {
-                 tg_sum_for_dLdX[h_idx] += tg_sum_for_dLdX[h_idx + s];
+            if (h_idx < s && (h_idx + s) < 2048) { // Bounds check
+                tg_sum_for_dLdX[h_idx] += tg_sum_for_dLdX[h_idx + s];
             }
             threadgroup_barrier(mem_flags::mem_threadgroup);
         }
-        if (h_idx == 0) { // Thread h_idx=0 now holds the sum for this instance_idx, e_idx
+        if (h_idx == 0) { // Thread h_idx=0 holds the final sum
             dL_dX_e = tg_sum_for_dLdX[0];
             grad_ffn_input[input_base + e_idx] = half(dL_dX_e);
         }

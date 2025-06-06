@@ -134,6 +134,7 @@ struct MSLKernels {
     id<MTLComputePipelineState> cross_entropy_loss;
     id<MTLComputePipelineState> loss_gradient;
     id<MTLComputePipelineState> adamw_optimizer;
+    id<MTLComputePipelineState> adamw_optimizer_float;  // Float precision version
     id<MTLComputePipelineState> gradient_clipping;
     id<MTLComputePipelineState> zero_gradients;
     

@@ -1,0 +1,56 @@
+# MSL Transformer BookCorpus Training Makefile
+
+CXX = clang++
+CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
+
+# Metal and Objective-C++ flags
+OBJCXXFLAGS = -fobjc-arc -fmodules
+FRAMEWORKS = -framework Metal -framework Foundation -framework CoreGraphics
+
+# Source files
+TRAIN_SOURCES = scripts/train_bookcorpus.mm src/host/transformer_model.mm
+TRAIN_OBJECTS = $(TRAIN_SOURCES:.mm=.o)
+TRAIN_TARGET = train_bookcorpus
+
+# Include directories
+INCLUDES = -I .
+
+.PHONY: all clean train info
+
+all: $(TRAIN_TARGET)
+
+$(TRAIN_TARGET): $(TRAIN_OBJECTS)
+	@echo "🔗 Linking BookCorpus Training Script..."
+	$(CXX) $(CXXFLAGS) $(OBJCXXFLAGS) $(FRAMEWORKS) $^ -o $@
+	@echo "✅ Training script compiled successfully!"
+	@echo "🎓 Ready to train on BookCorpus data"
+
+%.o: %.mm
+	@echo "📝 Compiling $<..."
+	$(CXX) $(CXXFLAGS) $(OBJCXXFLAGS) $(INCLUDES) -c $< -o $@
+
+clean:
+	@echo "🧹 Cleaning up..."
+	rm -f $(TRAIN_OBJECTS) $(TRAIN_TARGET)
+	rm -rf models/
+
+train: $(TRAIN_TARGET)
+	@echo "🚀 Starting BookCorpus Training..."
+	@echo "📚 This will train on 4.3GB of BookCorpus data"
+	@echo "⏱️  Estimated time: 30-60 minutes"
+	@echo "💾 Model will be saved to models/bookcorpus_trained_model.bin"
+	@echo ""
+	./$(TRAIN_TARGET)
+
+info:
+	@echo "📋 BookCorpus Training Information:"
+	@echo "   📁 Data location: data/bookcorpus/"
+	@echo "   📊 Data size: ~4.3GB (books_large_p1.txt + books_large_p2.txt)"
+	@echo "   🎯 Model config: 20M+ parameters, 512 embedding dim"
+	@echo "   📦 Batch size: 8 (optimized for M3 Max)"
+	@echo "   📅 Default epochs: 3"
+	@echo "   💾 Output: models/bookcorpus_trained_model.bin"
+	@echo ""
+	@echo "🚀 To start training: make train"
+
+.SUFFIXES: .mm .o 

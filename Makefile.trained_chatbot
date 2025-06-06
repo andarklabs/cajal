@@ -1,0 +1,69 @@
+# MSL Transformer Trained Chatbot Makefile
+# Builds a chatbot that loads pre-trained BookCorpus weights
+
+CXX = clang++
+CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
+
+# Metal and Objective-C++ flags
+OBJCXXFLAGS = -fobjc-arc -fmodules
+FRAMEWORKS = -framework Metal -framework Foundation -framework CoreGraphics
+
+# Source files
+SOURCES = src/host/chatbot_trained.mm src/host/transformer_model.mm
+OBJECTS = $(SOURCES:.mm=.o)
+TARGET = msl_trained_chatbot
+
+# Include directories
+INCLUDES = -I src/host
+
+.PHONY: all clean run check_model info
+
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	@echo "🔗 Linking MSL Trained Chatbot..."
+	$(CXX) $(CXXFLAGS) $(OBJCXXFLAGS) $(FRAMEWORKS) $^ -o $@
+	@echo "✅ Trained Chatbot compiled successfully!"
+	@echo "📚 This chatbot loads BookCorpus-trained weights"
+
+%.o: %.mm
+	@echo "📝 Compiling $<..."
+	$(CXX) $(CXXFLAGS) $(OBJCXXFLAGS) $(INCLUDES) -c $< -o $@
+
+clean:
+	@echo "🧹 Cleaning up..."
+	rm -f $(OBJECTS) $(TARGET)
+
+check_model:
+	@echo "🔍 Checking for trained model..."
+	@if [ -f "models/bookcorpus_trained_model.bin" ]; then \
+		echo "✅ Found trained model: models/bookcorpus_trained_model.bin"; \
+		echo "📊 Model size: $$(du -h models/bookcorpus_trained_model.bin | cut -f1)"; \
+	else \
+		echo "❌ No trained model found at: models/bookcorpus_trained_model.bin"; \
+		echo ""; \
+		echo "📋 To get a trained model:"; \
+		echo "   1. Train a new model: make -f Makefile.train train"; \
+		echo "   2. Or use existing checkpoint if available"; \
+		echo ""; \
+		echo "📁 Available models:"; \
+		ls -la models/ 2>/dev/null || echo "   (No models directory found)"; \
+	fi
+
+run: $(TARGET) check_model
+	@echo "🚀 Running BookCorpus-Trained MSL Transformer Chatbot..."
+	./$(TARGET)
+
+info:
+	@echo "📋 Trained Chatbot Information:"
+	@echo "   📚 Model: BookCorpus-trained MSL Transformer"
+	@echo "   🎯 Parameters: 20M+ (configurable)"
+	@echo "   💾 Expected model file: models/bookcorpus_trained_model.bin"
+	@echo "   🧠 Training data: BookCorpus literature dataset"
+	@echo "   ⚙️  Features: Nucleus sampling, temperature control, context management"
+	@echo "   🎭 Response quality: Should be coherent with trained weights"
+	@echo ""
+	@echo "🔧 To check model status: make check_model"
+	@echo "🚀 To run chatbot: make run"
+
+.SUFFIXES: .mm .o 
