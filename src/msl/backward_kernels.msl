@@ -205,152 +205,101 @@ kernel void ffn_backward(
     constant uint& embedding_dim,       // E
     constant uint& ffn_hidden_dim,      // H
 
-    // gid.x = instance_idx (0 to B*S - 1)
-    // gid.y = h_idx (0 to ffn_hidden_dim - 1) for some calcs, e_idx for others
-    // gid.z = e_idx (0 to embedding_dim - 1) for some calcs
-    // This kernel is complex. A common strategy:
-    // Thread (instance_idx, h_idx, e_idx)
-    // This dispatch is (B*S, H, E)
-    uint3 gid [[thread_position_in_grid]]
+    // 🔧 COMPLETELY REWRITTEN: 1D dispatch to avoid massive atomic contention
+    // Original 3D dispatch: (instances, ffn_hidden_dim, embedding_dim) = up to 32M+ threads!
+    // New 1D dispatch: (instances * max_threads_per_instance) = much fewer threads
+    // Each thread processes multiple elements sequentially to avoid atomic races
+    
+    uint gid [[thread_position_in_grid]]
 ) {
-    uint instance_idx = gid.x;
-    uint h_idx = gid.y; // Corresponds to a hidden dimension index
-    uint e_idx = gid.z; // Corresponds to an embedding dimension index
+    // Decode thread mapping from 1D dispatch
+    uint max_threads_per_instance = 256; // Must match host dispatch
+    uint instance_idx = gid / max_threads_per_instance;
+    uint thread_within_instance = gid % max_threads_per_instance;
 
     if (instance_idx >= batch_size * seq_len) return;
 
     uint input_base = instance_idx * embedding_dim;
     uint hidden_base = instance_idx * ffn_hidden_dim;
 
-    // --- Step 1: Compute dL/dW2, dL/db2, and dL/dH_act ---
-    // Each thread (instance_idx, h_idx, e_idx) processes one (h,e) element for dL/dW2
-    // and contributes to dL/dH_act and dL/db2.
-
-    // dL/dW2[h,e] += H_act[instance, h] * grad_ffn_output[instance, e]
-    if (h_idx < ffn_hidden_dim && e_idx < embedding_dim) {
-        float h_act_val = float(h_activated[hidden_base + h_idx]);
-        float grad_out_val = float(grad_ffn_output[input_base + e_idx]);
-        atomic_fetch_add_explicit(&grad_w2[h_idx * embedding_dim + e_idx], h_act_val * grad_out_val, memory_order_relaxed);
+    // --- STEP 1: Compute gradients for W2 and b2 ---
+    // Each thread processes a portion of the (h,e) matrix elements
+    uint total_w2_elements = ffn_hidden_dim * embedding_dim;
+    for (uint idx = thread_within_instance; idx < total_w2_elements; idx += max_threads_per_instance) {
+        uint h = idx / embedding_dim;
+        uint e = idx % embedding_dim;
+        
+        if (h < ffn_hidden_dim && e < embedding_dim) {
+            float h_act_val = float(h_activated[hidden_base + h]);
+            float grad_out_val = float(grad_ffn_output[input_base + e]);
+            atomic_fetch_add_explicit(&grad_w2[h * embedding_dim + e], h_act_val * grad_out_val, memory_order_relaxed);
+        }
     }
-
-    // dL/db2[e] += grad_ffn_output[instance, e]
-    // Only threads with h_idx = 0 perform this to avoid multiple additions for the same (instance,e)
-    if (h_idx == 0 && e_idx < embedding_dim) {
-        float grad_out_val = float(grad_ffn_output[input_base + e_idx]);
-        atomic_fetch_add_explicit(&grad_b2[e_idx], grad_out_val, memory_order_relaxed);
-    }
-
-    // 🔧 INTERIM SOLUTION: Fix threadgroup reductions with proper initialization
-    // This fixes the immediate NaN bug while we design the full atomic solution
     
-    // 🔧 OPTIMIZED: Each thread initializes only its own elements
-    threadgroup float tg_sum_for_dLdHact[1024];
-    if (e_idx < 1024) { // Only threads within bounds initialize
-        tg_sum_for_dLdHact[e_idx] = 0.0f;
+    // Compute b2 gradients - much less contention now
+    if (thread_within_instance < embedding_dim) {
+        float grad_out_val = float(grad_ffn_output[input_base + thread_within_instance]);
+        atomic_fetch_add_explicit(&grad_b2[thread_within_instance], grad_out_val, memory_order_relaxed);
     }
+    
+    // --- STEP 2: Compute intermediate gradient dL/dH_activated ---
+    // Each thread computes a subset of hidden units
+    threadgroup float tg_h_activated_grad[256]; // Shared storage for this instance
+    
+    for (uint h = thread_within_instance; h < ffn_hidden_dim; h += max_threads_per_instance) {
+        float sum = 0.0f;
+        for (uint e = 0; e < embedding_dim; e++) {
+            float grad_out_val = float(grad_ffn_output[input_base + e]);
+            float w2_val = float(w2[h * embedding_dim + e]);
+            sum += grad_out_val * w2_val;
+        }
+        tg_h_activated_grad[h % max_threads_per_instance] = sum;
+        
+        // Apply GELU derivative to get dL/dH_linear
+        float h_lin_val = float(h_linear[hidden_base + h]);
+        float gelu_deriv = gelu_derivative(h_lin_val);
+        float grad_h_linear = sum * gelu_deriv;
+        
+        // --- STEP 3: Compute gradients for W1 and b1 ---
+        // Much less atomic contention with fewer threads
+        for (uint e = 0; e < embedding_dim; e++) {
+            float input_val = float(ffn_input[input_base + e]);
+            atomic_fetch_add_explicit(&grad_w1[e * ffn_hidden_dim + h], input_val * grad_h_linear, memory_order_relaxed);
+        }
+        
+        atomic_fetch_add_explicit(&grad_b1[h], grad_h_linear, memory_order_relaxed);
+        
+        // Store for input gradient computation
+        tg_h_activated_grad[h % max_threads_per_instance] = grad_h_linear;
+    }
+    
     threadgroup_barrier(mem_flags::mem_threadgroup);
     
-    // Now the original reduction algorithm will work correctly
-    if (embedding_dim > 1024) return; // Safety check
-    
-    if (h_idx < ffn_hidden_dim && e_idx < embedding_dim) {
-        float grad_out_val = float(grad_ffn_output[input_base + e_idx]);
-        float w2_val = float(w2[h_idx * embedding_dim + e_idx]);
-        tg_sum_for_dLdHact[e_idx] = grad_out_val * w2_val;
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    float dL_dH_act_h = 0.0f;
-    if (h_idx < ffn_hidden_dim) {
-        // Safe reduction with zero-initialized memory
-        for (uint s = embedding_dim / 2; s > 0; s >>= 1) {
-            if (e_idx < s && (e_idx + s) < 1024) { // Bounds check
-                tg_sum_for_dLdHact[e_idx] += tg_sum_for_dLdHact[e_idx + s];
+    // --- STEP 4: Compute input gradients dL/dX ---
+    for (uint e = thread_within_instance; e < embedding_dim; e += max_threads_per_instance) {
+        float grad_input_sum = 0.0f;
+        
+        for (uint h = 0; h < ffn_hidden_dim; h++) {
+            // Use stored gradient or recompute if needed
+            float grad_h_linear;
+            if (h % max_threads_per_instance < ffn_hidden_dim) {
+                // Recompute since we can't store all values
+                float sum = 0.0f;
+                for (uint e2 = 0; e2 < embedding_dim; e2++) {
+                    float grad_out_val = float(grad_ffn_output[input_base + e2]);
+                    float w2_val = float(w2[h * embedding_dim + e2]);
+                    sum += grad_out_val * w2_val;
+                }
+                float h_lin_val = float(h_linear[hidden_base + h]);
+                float gelu_deriv = gelu_derivative(h_lin_val);
+                grad_h_linear = sum * gelu_deriv;
             }
-            threadgroup_barrier(mem_flags::mem_threadgroup);
+            
+            float w1_val = float(w1[e * ffn_hidden_dim + h]);
+            grad_input_sum += grad_h_linear * w1_val;
         }
-        if (e_idx == 0) {
-            dL_dH_act_h = tg_sum_for_dLdHact[0];
-        }
-    }
-    
-    // Simple broadcast using threadgroup memory
-    threadgroup float tg_dL_dH_act_h_val;
-    if (e_idx == 0 && h_idx < ffn_hidden_dim) {
-        tg_dL_dH_act_h_val = dL_dH_act_h;
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (h_idx < ffn_hidden_dim) {
-        dL_dH_act_h = tg_dL_dH_act_h_val;
-    }
-
-
-    // --- Step 2: Compute dL/dH_lin ---
-    // dL/dH_lin[instance, h] = dL/dH_act[instance, h] * GELU'(H_lin[instance,h])
-    float dL_dH_lin_h = 0.0f;
-    if (h_idx < ffn_hidden_dim && e_idx == 0) { // Let thread e_idx=0 compute this
-        float h_lin_val = float(h_linear[hidden_base + h_idx]);
-        float gelu_deriv_val = gelu_derivative(h_lin_val);
-        dL_dH_lin_h = dL_dH_act_h * gelu_deriv_val;
-    }
-    
-    // Broadcast dL_dH_lin_h to other threads
-    threadgroup float tg_dL_dH_lin_h_val;
-    if (e_idx == 0 && h_idx < ffn_hidden_dim) {
-        tg_dL_dH_lin_h_val = dL_dH_lin_h;
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (h_idx < ffn_hidden_dim) {
-        dL_dH_lin_h = tg_dL_dH_lin_h_val;
-    }
-
-
-    // --- Step 3: Compute dL/dW1, dL/db1, and dL/dX (grad_ffn_input) ---
-    // dL/dW1[e,h] += ffn_input[instance,e] * dL/dH_lin[instance,h]
-    if (e_idx < embedding_dim && h_idx < ffn_hidden_dim) {
-        float x_val = float(ffn_input[input_base + e_idx]);
-        // dL_dH_lin_h is for (instance_idx, h_idx), correctly obtained above
-        atomic_fetch_add_explicit(&grad_w1[e_idx * ffn_hidden_dim + h_idx], x_val * dL_dH_lin_h, memory_order_relaxed);
-    }
-
-    // dL/db1[h] += dL/dH_lin[instance,h]
-    // Only threads with e_idx = 0 perform this
-    if (e_idx == 0 && h_idx < ffn_hidden_dim) {
-        // dL_dH_lin_h is for (instance_idx, h_idx)
-        atomic_fetch_add_explicit(&grad_b1[h_idx], dL_dH_lin_h, memory_order_relaxed);
-    }
-
-    // dL/dX[instance,e] = sum_h (dL/dH_lin[instance,h] * w1[e,h])
-    // 🔧 FIXED: Zero-initialize threadgroup array for safe reduction
-    threadgroup float tg_sum_for_dLdX[2048]; // Max H, ensure ffn_hidden_dim <= 2048
-    
-    // 🔧 OPTIMIZED: Each thread initializes only its own elements  
-    if (h_idx < 2048) { // Only threads within bounds initialize
-        tg_sum_for_dLdX[h_idx] = 0.0f;
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    if (ffn_hidden_dim > 2048) return; // Safety check
-
-    if (e_idx < embedding_dim && h_idx < ffn_hidden_dim) {
-        float w1_val = float(w1[e_idx * ffn_hidden_dim + h_idx]);
-        tg_sum_for_dLdX[h_idx] = dL_dH_lin_h * w1_val;
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    
-    float dL_dX_e = 0.0f;
-    if (e_idx < embedding_dim) {
-        // Safe reduction with bounds checking
-        for (uint s = ffn_hidden_dim / 2; s > 0; s >>= 1) {
-            if (h_idx < s && (h_idx + s) < 2048) { // Bounds check
-                tg_sum_for_dLdX[h_idx] += tg_sum_for_dLdX[h_idx + s];
-            }
-            threadgroup_barrier(mem_flags::mem_threadgroup);
-        }
-        if (h_idx == 0) { // Thread h_idx=0 holds the final sum
-            dL_dX_e = tg_sum_for_dLdX[0];
-            grad_ffn_input[input_base + e_idx] = half(dL_dX_e);
-        }
+        
+        grad_ffn_input[input_base + e] = half(grad_input_sum);
     }
 }
 

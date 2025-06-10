@@ -283,6 +283,17 @@ bool TransformerModel::validateConfiguration() {
         return false;
     }
     
+    // VULNERABILITY CHECK 13: FFN numerical overflow threshold (NEW)
+    uint64_t ffn_product = (uint64_t)config.embedding_dim * config.ffn_hidden_dim;
+    const uint64_t FFN_NUMERICAL_STABILITY_THRESHOLD = 32768; // embedding_dim × ffn_hidden_dim > 16,384 triggers NaN
+    if (ffn_product > FFN_NUMERICAL_STABILITY_THRESHOLD) {
+        std::cerr << "⚠️  CONFIG WARNING: FFN product (" << ffn_product << ") > stability threshold (" << FFN_NUMERICAL_STABILITY_THRESHOLD << ")" << std::endl;
+        std::cerr << "    This configuration may experience numerical instability with half-precision weights." << std::endl;
+        std::cerr << "    embedding_dim: " << config.embedding_dim << ", ffn_hidden_dim: " << config.ffn_hidden_dim << std::endl;
+        std::cerr << "    Applied fixes: Proper Kaiming initialization + float accumulation + overflow clamping" << std::endl;
+        // Don't return false - this is now a warning since we've applied fixes
+    }
+    
     // SUCCESS: All checks passed
     std::cout << "✅ CONFIGURATION VALIDATION: All safety checks passed!" << std::endl;
     std::cout << "   Model parameters:" << std::endl;
@@ -634,7 +645,8 @@ kernel void feed_forward_network(
         h_activated[hidden_offset + h] = half(activated_val);
     }
     
-    // Second linear layer: H_activated @ W2 + b2
+    // Second linear layer: H_activated @ W2 + b2 
+    // FIXED: Enhanced numerical stability for large ffn_hidden_dim
     for (uint e = 0; e < embedding_dim; e++) {
         float output_sum = float(b2[e]);
         for (uint h = 0; h < ffn_hidden_dim; h++) {
@@ -642,6 +654,8 @@ kernel void feed_forward_network(
             float w2_val = float(W2[h * embedding_dim + e]);
             output_sum += activated_val * w2_val;
         }
+        // Prevent half-precision overflow with clamping
+        output_sum = clamp(output_sum, -65504.0f, 65504.0f);
         ffn_output[output_offset + e] = half(output_sum);
     }
 }
@@ -2777,9 +2791,12 @@ bool TransformerModel::backwardPass(size_t current_sequence_index) {
             [encoder setBytes:&config.ffn_hidden_dim length:sizeof(uint32_t) atIndex:14];
             
             // 🔧 SAFE APPROACH: Use device memory reductions instead of threadgroup reductions
-            // This avoids the threadgroup size limit (32,768 > 1,024) while fixing the NaN bug
-            MTLSize ffnThreadsPerGrid = MTLSizeMake(num_instances, config.embedding_dim, config.ffn_hidden_dim);
-            MTLSize ffnThreadsPerThreadgroup = MTLSizeMake(1, 1, 1); // Keep original, but fix kernel
+                    // FIXED: Replace 3D dispatch with simpler 1D dispatch to avoid atomic contention
+        // Original 3D dispatch created embedding_dim × ffn_hidden_dim threads per instance (massive atomic contention!)
+        // New approach: Much fewer threads, each processes multiple elements
+        uint32_t max_threads_per_instance = std::min(256u, config.embedding_dim); // Reasonable thread count
+        MTLSize ffnThreadsPerGrid = MTLSizeMake(num_instances * max_threads_per_instance, 1, 1);
+        MTLSize ffnThreadsPerThreadgroup = MTLSizeMake(max_threads_per_instance, 1, 1);
             [encoder dispatchThreads:ffnThreadsPerGrid threadsPerThreadgroup:ffnThreadsPerThreadgroup];
             
             // After FFN Backward Pass:
@@ -3229,9 +3246,10 @@ void TransformerModel::initializeWeights() {
         initLayerNorm(block.ln1_gamma, block.ln1_beta, "LN1");
         initLayerNorm(block.ln2_gamma, block.ln2_beta, "LN2");
         
-        // FFN weights
-        float ffn1_std = std::sqrt(2.0f / (config.embedding_dim + config.ffn_hidden_dim));
-        float ffn2_std = std::sqrt(2.0f / (config.ffn_hidden_dim + config.embedding_dim));
+        // FFN weights - FIXED: Use proper Kaiming/He initialization (fan-in only)
+        // This prevents numerical overflow when ffn_hidden_dim is large
+        float ffn1_std = std::sqrt(2.0f / config.embedding_dim);   // W1: fan-in = embedding_dim
+        float ffn2_std = std::sqrt(2.0f / config.ffn_hidden_dim);  // W2: fan-in = ffn_hidden_dim
         
         initBuffer(block.ffn_w1, ffn1_std, layer_prefix + " FFN W1");
         initBuffer(block.ffn_w2, ffn2_std, layer_prefix + " FFN W2");
