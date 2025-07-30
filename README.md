@@ -1,6 +1,6 @@
 # Cajal
 
-Cajal is a high-performance Transformer neural network implementation built entirely in Apple's Metal Shading Language (MSL), optimized for Apple Silicon. Originally developed to explore GPU-accelerated deep learning on Apple hardware, it features complete training and inference pipelines with comprehensive safety systems and extensive testing. The project is actively being developed with ongoing improvements to performance, safety, and functionality.
+Cajal is an attempt at a Transformer neural network implementation built entirely in Apple's Metal Shading Language (MSL), optimized for Apple Silicon. This project is a work in progress.
 
 ## Features
 
