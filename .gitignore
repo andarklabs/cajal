@@ -22,6 +22,8 @@ numerical_*
 *.swo
 *~
 
+.cursor
+
 # Development environments
 .vscode/
 .cursor/
