@@ -4,14 +4,12 @@ Cajal is an attempt at a Transformer neural network implementation built entirel
 
 ## Features
 
-- **Complete MSL Implementation**: 21 optimized GPU kernels covering forward pass, backward pass, and inference
-- **Production-Grade Performance**: Training steps in 0.7-15ms (10,000x improvement from initial implementation) - *continuously optimizing*
+- **Foundation MSL Implementation**: 21 optimized GPU kernels covering parts of inference, forward pass, backward pass, and inference
 - **Safety-First Design**: Buffer overflow protection and crash prevention with comprehensive diagnostic systems  
-- **Memory Efficient**: 11-65MB memory usage with half-precision optimization for 2.4x speedup
 - **Full Training Pipeline**: AdamW optimizer, gradient clipping, and automatic differentiation
 - **Inference Optimization**: KV caching for autoregressive text generation - *performance improvements ongoing*
-- **BPE Tokenization**: Custom tokenizer with 1,776 vocabulary trained on BookCorpus
-- **Interactive Chatbot**: Real-time text generation with configurable sampling strategies - *features being expanded*
+- **BPE Tokenization**: Custom tokenizer with 1,776 tokens of vocabulary trained on BookCorpus
+- **Interactive Chatbot**: Real-time text generation with configurable sampling strategies - *features being expanded and are broken currently*
 - **Comprehensive Testing**: Test-driven development with vulnerability verification and performance validation
 
 ## Installation
@@ -197,15 +195,15 @@ cajal/
 
 **Hardware Compatibility:**
 - Primary: Apple M3 Max (fully optimized)
-- Compatible: M1, M2 series (expected similar performance)
+- Hopefully compatible: M1, M2 series (expected similar performance)
 - GPU Utilization: 85%+ on optimal configurations
-- Memory Efficiency: Half-precision support for 2.4x speedup
+- Memory Efficiency: Half-precision is available
 
 ## Future Development
 
 The project is actively being developed with planned improvements including:
 
-- **Model Scaling**: Support for larger model architectures (GPT-2/GPT-3 scale) while maintaining safety constraints
+- **Model Scaling**: Support for larger model architectures (GPT-2 size) while maintaining safety constraints
 - **Advanced Attention**: Implementation of sparse attention, local attention, and other architectural variants
 - **Quantization Support**: INT8/INT4 quantization for improved inference performance and reduced memory usage
 - **Multi-Device Training**: Support for distributed training across multiple Apple Silicon devices
@@ -216,4 +214,4 @@ The project is actively being developed with planned improvements including:
 - **Model Compression**: Techniques for reducing model size while maintaining performance
 - **Evaluation Framework**: Comprehensive benchmarking suite for model quality assessment
 
-*Note: This project is a work in progress with ongoing active development. While the core implementation is production-ready and extensively tested, new features and optimizations are continuously being added. Contributions and feedback are welcome as the project evolves.*
+*Note: This project is a work in progress with ongoing development. While the core implementation is tested, new features and optimizations are continuously being added and breaking changes are likely. Contributions and feedback are welcome as the project evolves.*
